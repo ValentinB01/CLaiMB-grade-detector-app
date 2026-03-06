@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from models.schemas import RouteRecord, RouteHistoryResponse
 from database import db
 
-router = APIRouter(prefix="/api", tags=["history"])
+router = APIRouter(tags=["history"])
 logger = logging.getLogger(__name__)
 
 

@@ -1,34 +1,46 @@
 """
 ClAImb AI Coach — FastAPI Application
-
-Architecture (Service-Oriented):
-  /routes   — HTTP handlers (thin layer)
-  /services — AI logic: VisionService, GradingService
-  /models   — Pydantic contracts shared between Mobile & Backend
-  /worker   — Celery async worker (Redis broker)
-  /tasks    — Celery task definitions
 """
 import logging
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 
+# Încarcă variabilele de mediu
 load_dotenv(Path(__file__).parent / ".env")
 
+# Importuri rute și bază de date
 from routes.analysis import router as analysis_router
 from routes.history import router as history_router
+from database import connect_to_mongo, close_mongo_connection
 
 # ---------------------------------------------------------------------------
-# App setup
+# 1. Definire Lifespan (Gestionare conexiune MongoDB)
+# ---------------------------------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ce se întâmplă la pornire (Startup)
+    await connect_to_mongo()
+    yield
+    # Ce se întâmplă la oprire (Shutdown)
+    await close_mongo_connection()
+
+# ---------------------------------------------------------------------------
+# 2. App setup (O SINGURĂ INSTANȚĂ)
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="ClAImb AI Coach API",
     description="AI-powered climbing route analysis: hold detection + V-scale grading",
     version="1.0.0",
+    lifespan=lifespan # Integrăm lifespan-ul aici
 )
 
+# ---------------------------------------------------------------------------
+# 3. Middleware (CORS) - Esențial pentru conexiunea cu telefonul
+# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,22 +50,30 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Routers
+# 4. Routers (Înregistrarea rutelor)
 # ---------------------------------------------------------------------------
-app.include_router(analysis_router)
-app.include_router(history_router)
+app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
+app.include_router(history_router, prefix="/api", tags=["History"])
 
 # ---------------------------------------------------------------------------
-# Health check
+# 5. Health check
 # ---------------------------------------------------------------------------
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "ClAImb AI Coach"}
 
 # ---------------------------------------------------------------------------
-# Logging
+# 6. Logging
 # ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(name)s  %(levelname)s  %(message)s",
 )
+
+# ---------------------------------------------------------------------------
+# 7. Execuție Server
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Serverul ClAImb pornește pe http://0.0.0.0:8000")
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=True)

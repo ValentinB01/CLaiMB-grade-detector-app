@@ -12,7 +12,7 @@ from services.vision_service import VisionService
 from services.grading_service import GradingService
 from database import db
 
-router = APIRouter(prefix="/api", tags=["analysis"])
+router = APIRouter( tags=["analysis"])
 logger = logging.getLogger(__name__)
 
 _vision = VisionService()
