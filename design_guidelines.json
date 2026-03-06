@@ -1,0 +1,216 @@
+{
+  "identity": {
+    "name": "ClAImb AI Coach",
+    "persona": "The Digital Crag",
+    "core_concept": "Merging the tactile grit of climbing with the precision of computer vision. Dark, focused, and electric.",
+    "emotional_tone": "Precision, Athleticism, Clarity, Night-Session",
+    "principles": [
+      "Fusion: Rock texture meets Neon data overlays.",
+      "Focus: The climbing wall is the hero; UI recedes.",
+      "Feedback: Instant, glowing visual confirmation of AI detection.",
+      "Efficiency: Thumb-reachable controls for chalked-up hands."
+    ]
+  },
+  "palette": {
+    "mode": "dark",
+    "background": {
+      "main": "#09090b",
+      "card": "#18181b",
+      "modal": "#27272a",
+      "overlay": "rgba(0, 0, 0, 0.7)"
+    },
+    "text": {
+      "primary": "#fafafa",
+      "secondary": "#a1a1aa",
+      "muted": "#52525b",
+      "inverse": "#09090b"
+    },
+    "brand": {
+      "primary": "#22d3ee",
+      "primary_foreground": "#000000",
+      "secondary": "#a1a1aa",
+      "accent": "#f472b6"
+    },
+    "functional": {
+      "success": "#4ade80",
+      "warning": "#fbbf24",
+      "error": "#ef4444",
+      "info": "#3b82f6"
+    },
+    "ai_overlay": {
+      "hold_stroke": "#00ffcc",
+      "hold_fill": "rgba(0, 255, 204, 0.2)",
+      "confidence_high": "#4ade80",
+      "confidence_low": "#ef4444"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "main": "System",
+      "display": "System",
+      "mono": "System"
+    },
+    "weights": {
+      "regular": "400",
+      "medium": "500",
+      "bold": "700",
+      "heavy": "900"
+    },
+    "sizes": {
+      "xs": 12,
+      "sm": 14,
+      "base": 16,
+      "lg": 18,
+      "xl": 20,
+      "2xl": 24,
+      "3xl": 30,
+      "4xl": 36,
+      "5xl": 48
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "xl": 32,
+    "2xl": 48,
+    "3xl": 64
+  },
+  "borders": {
+    "radius": {
+      "sm": 4,
+      "md": 8,
+      "lg": 12,
+      "full": 9999
+    },
+    "width": {
+      "thin": 1,
+      "medium": 2
+    },
+    "color": {
+      "default": "#27272a",
+      "active": "#52525b"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": {
+        "bg": "#22d3ee",
+        "text": "#09090b",
+        "radius": 9999,
+        "padding_vertical": 16,
+        "padding_horizontal": 32,
+        "text_weight": "700",
+        "uppercase": true
+      },
+      "secondary": {
+        "bg": "#27272a",
+        "text": "#fafafa",
+        "radius": 8,
+        "padding_vertical": 12
+      },
+      "icon": {
+        "size": 48,
+        "bg": "rgba(255,255,255,0.1)",
+        "radius": 24
+      }
+    },
+    "cards": {
+      "bg": "#18181b",
+      "border": "#27272a",
+      "radius": 12,
+      "padding": 16,
+      "shadow": {
+        "color": "#000",
+        "offset": { "width": 0, "height": 4 },
+        "opacity": 0.3,
+        "radius": 4
+      }
+    },
+    "inputs": {
+      "bg": "#27272a",
+      "text": "#fafafa",
+      "placeholder": "#71717a",
+      "radius": 8,
+      "height": 48,
+      "padding": 12,
+      "border_focus": "#22d3ee"
+    }
+  },
+  "screens": {
+    "home": {
+      "layout": "Scrollable dashboard with large hero stats",
+      "sections": [
+        "Welcome/Header",
+        "Recent Activity (Card List)",
+        "Quick Action: Scan Route (FAB or large card)"
+      ]
+    },
+    "camera": {
+      "layout": "Full screen camera view",
+      "overlay": "Minimal UI, Shutter button bottom center, Flash toggle top right",
+      "instruction": "Text overlay: 'Align climbing wall in frame'"
+    },
+    "analysis": {
+      "layout": "Image preview with SVG overlays + Bottom Sheet for details",
+      "interactions": "Tap hold to see confidence/type",
+      "elements": [
+        "SVG Layer (absolute position over image)",
+        "Grade Badge (V4)",
+        "Confidence Meter",
+        "Save/Discard Actions"
+      ]
+    },
+    "history": {
+      "layout": "Grid or List of past climbs",
+      "item_style": "Card with thumbnail, date, grade, gym name"
+    }
+  },
+  "assets": {
+    "images": [
+      {
+        "url": "https://images.unsplash.com/photo-1696105538786-52c0636202a1",
+        "category": "placeholder_wall",
+        "description": "Indoor climbing wall reference"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1615511620641-a6f87b288dc8",
+        "category": "texture",
+        "description": "Rock texture background"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1602946430669-360a40c28045",
+        "category": "hero",
+        "description": "Climber in action"
+      }
+    ],
+    "icons": {
+      "library": "Lucide React Native (or Expo Vector Icons)",
+      "set": ["Camera", "History", "TrendingUp", "Zap", "User", "ChevronLeft", "X", "Check"]
+    }
+  },
+  "tech_stack": {
+    "framework": "React Native Expo",
+    "styling": "StyleSheet.create",
+    "navigation": "Expo Router / React Navigation",
+    "camera": "expo-camera",
+    "svg": "react-native-svg",
+    "storage": "AsyncStorage (for local history cache)",
+    "backend": "FastAPI"
+  },
+  "universal_guidelines": {
+    "general": [
+      "No CSS/Tailwind classes. Use StyleSheet objects.",
+      "Use SafeAreaView for all screens to handle notches.",
+      "Touch targets must be at least 44x44 points.",
+      "Text must have explicit colors defined (React Native defaults can vary).",
+      "Images must have explicit width/height or flex style."
+    ],
+    "testing": [
+      "Add testID props to all interactable elements for Detox/Appium.",
+      "Mock Camera module for UI tests."
+    ]
+  },
+  "instructions_to_main_agent": "You are building a React Native Expo app. Strictly use StyleSheet.create(). Do NOT use HTML tags (div, span). Use View, Text, Image, TouchableOpacity/Pressable. For the 'Analysis' screen, you must layer the <Svg> component absolutely over the <Image> component to draw the hold circles. The Grade should be prominent (Text 5xl). The 'Guest Mode' means no login screen on launch—go straight to Home or Onboarding."
+}
