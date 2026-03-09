@@ -3,6 +3,11 @@ from typing import List, Optional
 from datetime import datetime
 import uuid
 
+class DetectedRoute(BaseModel):
+    color: str
+    holds_ids: List[int]
+    estimated_grade: str
+    reasoning: str
 
 class HoldLocation(BaseModel):
     """Represents a detected climbing hold on the wall."""
@@ -30,10 +35,9 @@ class AnalysisResponse(BaseModel):
     notes: str
     gym_name: str
     processed_at: str
-
+    detected_routes: List[DetectedRoute] = []
 
 class RouteRecord(BaseModel):
-    """Persisted route history entry."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     analysis_id: str
     gym_name: str
@@ -44,7 +48,7 @@ class RouteRecord(BaseModel):
     thumbnail_base64: Optional[str] = None
     analyzed_at: str
     user_id: str = "guest"
-
+    detected_routes: List[DetectedRoute] = []
 
 class RouteHistoryResponse(BaseModel):
     routes: List[RouteRecord]

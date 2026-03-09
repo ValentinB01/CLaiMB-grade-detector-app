@@ -1,77 +1,113 @@
 import os
 import json
+import base64
 import logging
-import re
-import google.generativeai as genai # pip install google-generativeai
-from typing import List, Tuple
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont
+from typing import List, Tuple, Dict, Any
+
+# Folosim noul pachet cerut de Google
+from google import genai
+from google.genai import types
+
 from models.schemas import HoldLocation
 
 logger = logging.getLogger(__name__)
 
 class GradingService:
-    """Calculează gradul V folosind Google Gemini (Gratuit)."""
-
     def __init__(self):
-        # Configurează API Key-ul Gemini din .env
         self.api_key = os.environ.get("GEMINI_API_KEY")
         if self.api_key:
-            genai.configure(api_key=self.api_key)
-            # Folosim 1.5 Flash pentru viteză mare sau 1.5 Pro pentru precizie maximă
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.client = genai.Client(api_key=self.api_key)
         else:
-            self.model = None
-            logger.warning("⚠️ GEMINI_API_KEY lipsește!")
+            self.client = None
+            logger.error("❌ GEMINI_API_KEY lipsește din .env!")
 
-    async def grade_route(self, holds: List[HoldLocation], image_base64: str) -> Tuple[str, float, str]:
-        """Trimite imaginea și datele prizelor către Gemini pentru evaluare."""
-        if not holds:
-            return "V0", 0.5, "Nu s-au detectat prize."
-
-        if not self.model:
-            return "V?", 0.5, "Serviciul AI de grading este indisponibil (cheie lipsă)."
-
-        # Pregătim datele statistice de la Roboflow pentru a ajuta AI-ul
-        hold_count = len(holds)
-        hold_types = ", ".join(set([h.hold_type for h in holds]))
-        
-        # Prompt-ul trimis către Gemini
-        prompt = f"""
-        Ești un antrenor expert de bouldering. Analizează această imagine și statisticile prizelor detectate:
-        - Număr total de prize: {hold_count}
-        - Tipuri de prize: {hold_types}
-        
-        Reguli:
-        1. Estimează gradul pe scara Hueco (V0-V11).
-        2. Analizează distanța dintre prize și unghiul peretelui vizibil în poză.
-        3. Oferă un sfat scurt de coaching (1-2 propoziții).
-        
-        Returnează DOAR un obiect JSON valid:
-        {{
-            "grade": "V3",
-            "confidence": 0.85,
-            "notes": "Textul sfatului tău aici."
-        }}
-        """
+    async def grade_route(self, holds: List[HoldLocation], image_base64: str) -> Tuple[List[dict], str, float, str]:
+        """Găsește traseele pe culori și le evaluează gradul."""
+        if not self.client or not holds:
+            return "V?", 0.0, "AI Grading indisponibil sau nu s-au găsit prize."
 
         try:
-            # Gemini acceptă imagini base64 sub formă de dicționar
-            image_part = {
-                "mime_type": "image/jpeg",
-                "data": image_base64
+            # 1. Desenează numere pe poză peste prizele găsite de Roboflow
+            annotated_image = self._draw_holds_on_image(image_base64, holds)
+
+            # 2. Construim prompt-ul pentru Gemini
+            prompt = """
+            Ești un antrenor expert de bouldering (climbing). 
+            În imaginea atașată am marcat cu cercuri roșii și numere albe toate prizele detectate.
+            Te rog să analizezi imaginea și să grupezi aceste prize în trasee distincte, bazându-te pe culoarea lor (ex: traseul roșu, traseul albastru).
+            
+            Returnează STRICT un obiect JSON cu următoarea structură (fără alte texte):
+            {
+              "routes": [
+                {
+                  "color": "Numele culorii (ex: Red, Blue)",
+                  "holds_ids": [lista cu numerele prizelor din acest traseu],
+                  "estimated_grade": "Gradul estimat V-scale (ex: V3)",
+                  "reasoning": "Scurtă explicație a gradului (ex: prize mici, necesită forță pe degete)"
+                }
+              ],
+              "overall_notes": "Sfat general pentru acest perete."
             }
-            
-            # Apelăm Gemini
-            response = self.model.generate_content([prompt, image_part])
-            
-            # Curățăm răspunsul (uneori AI-ul pune ```json ... ```)
-            clean_json = re.search(r'\{.*\}', response.text, re.DOTALL).group()
-            data = json.loads(clean_json)
-            
-            return (
-                data.get("grade", "V0"),
-                data.get("confidence", 0.7),
-                data.get("notes", "Traseu interesant!")
+            """
+
+            # 3. Trimitem la Gemini 2.5 Flash (cel mai bun pentru vizual)
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=[
+                    annotated_image,
+                    prompt
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2 # Vrem răspunsuri clare, nu fantezii
+                )
             )
+
+            # 4. Parsăm răspunsul JSON
+            result_data = json.loads(response.text)
+            
+            # Pentru compatibilitate cu baza ta de date actuală, extragem cel mai greu traseu
+            # (Pe viitor poți modifica baza de date să le salveze pe toate)
+            routes = result_data.get("routes", [])
+            if not routes:
+                return "V?", 0.0, "Gemini nu a putut forma trasee."
+
+            best_route = routes[0] # Luăm primul traseu (sau poți face o logică să îl iei pe cel mai greu)
+            main_grade = best_route.get("estimated_grade", "V?")
+            overall_notes = result_data.get("overall_notes", "Trasee detectate cu succes.")
+
+            logger.info(f"✅ Gemini a găsit {len(routes)} trasee!")
+            
+            # Returnăm: lista completă, gradul principal, încrederea, notițele
+            return routes, main_grade, 0.85, overall_notes
+
         except Exception as e:
-            logger.error(f"❌ Eroare Gemini Grading: {e}")
-            return "V2", 0.5, "Eroare la procesarea AI, am returnat un grad estimativ."
+            logger.error(f"❌ Eroare în GradingService: {e}")
+            return "V?", 0.0, f"Eroare AI: {str(e)}"
+
+    def _draw_holds_on_image(self, image_base64: str, holds: List[HoldLocation]) -> Image.Image:
+        """Desenează numere peste prize pentru ca Gemini să le poată identifica."""
+        image_data = base64.b64decode(image_base64)
+        img = Image.open(BytesIO(image_data)).convert("RGB")
+        draw = ImageDraw.Draw(img)
+        
+        width, height = img.size
+
+        # Desenăm fiecare priză cu ID-ul ei (indexul)
+        for idx, hold in enumerate(holds):
+            # Transformăm coordonatele normalizate în pixeli reali
+            cx = hold.x * width
+            cy = hold.y * height
+            r = hold.radius * max(width, height)
+
+            # Desenăm un cerc roșu
+            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline="red", width=4)
+            
+            # Scriem numărul (ID-ul) lângă priză (cu fundal negru ca să fie vizibil)
+            text = str(idx)
+            draw.rectangle([cx - 10, cy - 10, cx + 15, cy + 15], fill="black")
+            draw.text((cx - 5, cy - 5), text, fill="white")
+
+        return img

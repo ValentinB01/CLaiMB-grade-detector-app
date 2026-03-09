@@ -14,10 +14,13 @@ class VisionService:
     def __init__(self):
         # Citim cheia direct din mediu
         self.roboflow_key: Optional[str] = os.environ.get("ROBOFLOW_API_KEY")
-        # Configurația proiectului tău de bouldering de pe Roboflow
-        self.workspace = "climbing-holds-ek8zs"
-        self.project = "climbing-hold-3cwll"
-        self.version = "1"
+        
+        # ⚠️ AICI MODIFICI CU DATELE NOULUI TĂU MODEL DE PE ROBOFLOW UNIVERSE
+        # Dacă modelul se numește "bouldering-holds-xyz" și are versiunea "3", scrii așa:
+        self.project = os.environ.get("ROBOFLOW_PROJECT", "holds-tptrk-u6v1c") 
+        self.version = os.environ.get("ROBOFLOW_VERSION", "1")
+        
+        # Construim URL-ul corect
         self.url = f"https://detect.roboflow.com/{self.project}/{self.version}"
 
     async def analyze_image(self, image_base64: str) -> List[HoldLocation]:
@@ -31,14 +34,14 @@ class VisionService:
     async def _detect_roboflow(self, image_base64: str) -> List[HoldLocation]:
         """Apel asincron către API-ul Roboflow."""
         try:
-            # Decodăm imaginea pentru a o trimite ca bytes (formatul cerut de Roboflow)
-            image_bytes = base64.b64decode(image_base64)
+            # 1. Curățăm string-ul de prefixul de la telefon (ex: "data:image/jpeg;base64,...")
+            clean_base64 = image_base64.split(",")[-1] if "," in image_base64 else image_base64
 
             async with httpx.AsyncClient(timeout=20) as client:
                 resp = await client.post(
                     self.url,
                     params={"api_key": self.roboflow_key},
-                    content=image_bytes,
+                    content=clean_base64, # <-- Aici era problema! Acum trimitem textul direct.
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
 
@@ -54,17 +57,21 @@ class VisionService:
             
             holds = []
             for pred in data.get("predictions", []):
-                # Mapăm clasa detectată de model la tipurile noastre (start, finish, etc.)
-                h_type = self._map_label_to_type(pred.get("class", "hand"))
+                # Filtrăm predicțiile slabe (păstrăm doar ce e > 40% sigur)
+                if pred.get("confidence", 0) < 0.6:
+                    continue
+
+                clasa_detectata = pred.get("class", "unknown").lower()
+                h_type = self._map_label_to_type(clasa_detectata)
                 
                 holds.append(
                     HoldLocation(
-                        x=pred["x"] / img_w, # Normalizare 0-1
+                        x=pred["x"] / img_w, 
                         y=pred["y"] / img_h,
                         radius=max(pred["width"], pred["height"]) / (2 * max(img_w, img_h)),
                         confidence=round(pred["confidence"], 3),
-                        hold_type=h_type,
-                        color=pred.get("class", "unknown") # Folosim clasa ca denumire de culoare/tip
+                        hold_type=h_type,          
+                        color=clasa_detectata      
                     )
                 )
             
@@ -76,5 +83,23 @@ class VisionService:
             return self._fallback_holds()
 
     def _map_label_to_type(self, label: str) -> str:
-        """Convertește etichetele modelului AI în tipurile recunoscute de frontend."""
-        label = label.lower
+        """Convertește etichetele modelului AI în tipurile sigure pt Frontend."""
+        # 1. Corectat bug-ul cu label.lower
+        lbl = label.lower()
+        
+        # 2. Mapare inteligentă:
+        if "start" in lbl:
+            return "start"
+        if "finish" in lbl or "top" in lbl:
+            return "finish"
+        if "foot" in lbl:
+            return "foot"
+            
+        # Orice altceva (jug, crimp, sloper, pinch, volume, etc.) devine "hand"
+        # pentru a nu da crash schemei Pydantic, dar denumirea reală rămâne salvată în `color`
+        return "hand"
+    
+    def _fallback_holds(self):
+        """Funcție de siguranță: returnează o listă goală dacă Roboflow pică."""
+        logger.warning("⚠️ Se folosește fallback_holds deoarece Roboflow a eșuat.")
+        return []

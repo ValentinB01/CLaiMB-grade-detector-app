@@ -19,7 +19,7 @@ async def get_history(
 ):
     """Return paginated route history for a user."""
     cursor = (
-        db.route_history.find({"user_id": user_id}, {"_id": 0})
+        db.db.route_history.find({"user_id": user_id}, {"_id": 0})
         .sort("analyzed_at", -1)
         .limit(limit)
     )
@@ -36,7 +36,7 @@ async def get_history(
 @router.delete("/history/{record_id}")
 async def delete_history_entry(record_id: str):
     """Delete a single history entry by its record ID."""
-    result = await db.route_history.delete_one({"id": record_id})
+    result = await db.db.route_history.delete_one({"id": record_id})    
     if result.deleted_count == 0:
         return {"deleted": False, "message": "Record not found"}
     return {"deleted": True, "id": record_id}
@@ -45,7 +45,7 @@ async def delete_history_entry(record_id: str):
 @router.get("/history/stats")
 async def get_stats(user_id: str = Query(default="guest")):
     """Aggregate stats: total routes, grade distribution, best grade."""
-    docs = await db.route_history.find({"user_id": user_id}, {"grade": 1, "_id": 0}).to_list(1000)
+    docs = await db.db.route_history.find({"user_id": user_id}, {"grade": 1, "_id": 0}).to_list(1000)
     if not docs:
         return {"total_routes": 0, "best_grade": None, "grades": {}}
 

@@ -1,5 +1,13 @@
 /** Simple in-memory store to pass analysis results between screens. */
 
+// 1. Adăugăm interfața pentru un singur traseu (cum vine de la Gemini)
+export interface DetectedRoute {
+  color: string;
+  holds_ids: number[];
+  estimated_grade: string;
+  reasoning: string;
+}
+
 export interface HoldLocation {
   x: number;
   y: number;
@@ -12,12 +20,13 @@ export interface HoldLocation {
 export interface AnalysisResult {
   analysis_id: string;
   holds: HoldLocation[];
-  grade: string;
+  grade: string; // Îl păstrăm ca grad general/principal
   confidence: number;
   notes: string;
   gym_name: string;
   processed_at: string;
-  image_base64: string; // attached on frontend before storing
+  image_base64: string; 
+  detected_routes?: DetectedRoute[]; 
 }
 
 let _pending: AnalysisResult | null = null;
