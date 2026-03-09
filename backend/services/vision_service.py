@@ -63,12 +63,15 @@ class VisionService:
 
                 clasa_detectata = pred.get("class", "unknown").lower()
                 h_type = self._map_label_to_type(clasa_detectata)
+                avg_size = (pred["width"] + pred["height"]) / 2
+                adjusted_radius = (avg_size / 2) * 0.8 
                 
+                normalized_radius = adjusted_radius / max(img_w, img_h)
                 holds.append(
                     HoldLocation(
                         x=pred["x"] / img_w, 
                         y=pred["y"] / img_h,
-                        radius=max(pred["width"], pred["height"]) / (2 * max(img_w, img_h)),
+                        radius=normalized_radius,
                         confidence=round(pred["confidence"], 3),
                         hold_type=h_type,          
                         color=clasa_detectata      
