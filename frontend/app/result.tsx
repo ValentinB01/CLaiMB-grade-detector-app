@@ -10,7 +10,7 @@ import {
   LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Rect, Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { 
@@ -144,16 +144,25 @@ export default function ResultScreen() {
                   width={imgLayout.width}
                   height={imgLayout.height}
                 >
-                  {result.holds.map((hold, idx) => {
+                 {result.holds.map((hold, idx) => {
                     const cx = hold.x * imgLayout.width;
                     const cy = hold.y * imgLayout.height;
-                    const r = hold.radius * Math.min(imgLayout.width, imgLayout.height);
                     
-                    // Verificăm dacă priza aparține traseului activ
-                    const isInActiveRoute = currentRoute 
-                        ? currentRoute.holds_ids.includes(idx) 
-                        : true;
+                    // 1. Luăm dimensiunile exacte trimise de Roboflow
+                    const baseW = hold.width ? hold.width * imgLayout.width : hold.radius * 2 * imgLayout.width;
+                    const baseH = hold.height ? hold.height * imgLayout.height : hold.radius * 2 * imgLayout.height;
+                    
+                    // 2. AICI ESTE TRUCUL: Facem cutia cu 10% mai mică vizual!
+                    // Astfel, nu va mai atinge marginile și va părea mai precisă.
+                    const boxW = baseW * 0.90; // 90% din lățimea originală
+                    const boxH = baseH * 0.90; // 90% din înălțimea originală
 
+                    // 3. Calculăm recentrarea (re-alinierea punctului de start)
+                    // (Recentrare necesară pentru că în SVG desenăm din colțul stânga-sus)
+                    const rectX = cx - boxW / 2;
+                    const rectY = cy - boxH / 2;
+                    
+                    const isInActiveRoute = currentRoute ? currentRoute.holds_ids.includes(idx) : true;
                     const baseColor = holdColor(hold.hold_type);
                     const drawColor = isInActiveRoute ? baseColor : C.muted;
                     const opacity = isInActiveRoute ? 1 : 0.15;
@@ -162,20 +171,22 @@ export default function ResultScreen() {
 
                     return (
                       <React.Fragment key={idx}>
-                        <Circle
-                          cx={cx}
-                          cy={cy}
-                          r={r}
+                        <Rect
+                          x={rectX}
+                          y={rectY}
+                          width={boxW}
+                          height={boxH}
                           fill={drawColor + '33'}
                           stroke={drawColor}
                           strokeWidth={isSelected ? 3 : 2}
                           opacity={opacity}
+                          rx={4} // Un mic radius la colțuri ca să arate mai profesional
                           onPress={() => setSelectedHold(isSelected ? null : hold)}
                         />
                         {isSelected && isInActiveRoute && (
                           <SvgText
                             x={cx}
-                            y={cy - r - 4}
+                            y={rectY - 6} // Mutăm textul deasupra dreptunghiului
                             fontSize={10}
                             fill={drawColor}
                             textAnchor="middle"
@@ -313,7 +324,7 @@ const styles = StyleSheet.create({
   topTitle: { fontSize: 16, fontWeight: '700', color: C.primary },
   scroll: { paddingBottom: 40 },
   imageContainer: { position: 'relative', marginHorizontal: 16, borderRadius: 16, overflow: 'hidden', marginBottom: 12 },
-  imageWrap: { width: '100%', aspectRatio: 3 / 4 },
+  imageWrap: { width: '100%', aspectRatio: 9 / 16 },
   image: { width: '100%', height: '100%' },
   gradeBadgeOverlay: { position: 'absolute', top: 16, right: 16, borderWidth: 2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
   gradeOverlayText: { fontSize: 28, fontWeight: '900' },

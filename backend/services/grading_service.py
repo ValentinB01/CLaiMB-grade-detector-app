@@ -85,7 +85,7 @@ class GradingService:
 
         except Exception as e:
             logger.error(f"❌ Eroare în GradingService: {e}")
-            return "V?", 0.0, f"Eroare AI: {str(e)}"
+            return [], "V?", 0.0, f"Grading unavailable. Model busy: {str(e)}"
 
     def _draw_holds_on_image(self, image_base64: str, holds: List[HoldLocation]) -> Image.Image:
         """Desenează numere peste prize pentru ca Gemini să le poată identifica."""

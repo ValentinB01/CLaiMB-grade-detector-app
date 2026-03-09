@@ -13,6 +13,8 @@ class HoldLocation(BaseModel):
     """Represents a detected climbing hold on the wall."""
     x: float = Field(..., ge=0.0, le=1.0, description="Center X position, normalized 0-1")
     y: float = Field(..., ge=0.0, le=1.0, description="Center Y position, normalized 0-1")
+    width: float = 0.0   # <--- Adăugat
+    height: float = 0.0  # <--- Adăugat
     radius: float = Field(..., ge=0.001, le=0.2, description="Hold radius, normalized 0-1")
     confidence: float = Field(..., ge=0.0, le=1.0)
     hold_type: str = Field(default="hand", description="start | finish | hand | foot")

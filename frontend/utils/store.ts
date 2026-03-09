@@ -11,6 +11,8 @@ export interface DetectedRoute {
 export interface HoldLocation {
   x: number;
   y: number;
+  width?: number;
+  height?: number;
   radius: number;
   confidence: number;
   hold_type: string;
