@@ -25,34 +25,54 @@ class GradingService:
 
     async def grade_route(self, holds: List[HoldLocation], image_base64: str) -> Tuple[List[dict], str, float, str]:
         """Găsește traseele pe culori și le evaluează gradul."""
+        # Corectat: Returnăm 4 elemente (lista goală la început)
         if not self.client or not holds:
-            return "V?", 0.0, "AI Grading indisponibil sau nu s-au găsit prize."
+            return [], "V?", 0.0, "AI Grading unavailable or no holds found."
 
         try:
             # 1. Desenează numere pe poză peste prizele găsite de Roboflow
             annotated_image = self._draw_holds_on_image(image_base64, holds)
 
-            # 2. Construim prompt-ul pentru Gemini
-            prompt = """
-            Ești un antrenor expert de bouldering (climbing). 
-            În imaginea atașată am marcat cu cercuri roșii și numere albe toate prizele detectate.
-            Te rog să analizezi imaginea și să grupezi aceste prize în trasee distincte, bazându-te pe culoarea lor (ex: traseul roșu, traseul albastru).
-            
-            Returnează STRICT un obiect JSON cu următoarea structură (fără alte texte):
-            {
+            # 2. Pregătim un rezumat text al prizelor pentru a ajuta AI-ul
+            holds_summary = ""
+            for idx, h in enumerate(holds):
+                color_str = h.color if h.color else "unknown"
+                holds_summary += f"[{idx}] Color: {color_str}, Type: {h.hold_type}, X:{h.x:.2f}, Y:{h.y:.2f}\n"
+
+            # 3. Construim noul prompt avansat pentru Gemini (Master Route Setter)
+            prompt = f"""
+            You are an expert bouldering coach and master route setter. 
+            Your task is to analyze the attached image of a climbing wall (where detected holds are marked with red circles and white numbers) and the provided list of detected holds to group them into individual climbing routes (by color) and estimate their difficulty grade on the V-scale (V0 to V17).
+
+            Here is the data of the detected holds (X and Y coordinates are normalized 0-1):
+            {holds_summary}
+
+            Follow these strict grading rules to estimate the difficulty:
+            - V0 - V2 (Beginner): Very large, positive holds (jugs). High density of holds (close to each other). Plentiful and obvious footholds. Straightforward, ladder-like movement.
+            - V3 - V5 (Intermediate): Smaller holds (crimps, pinches, moderate slopers). Longer distances between holds requiring some dynamic movement or moderate lock-offs. Requires specific techniques (heel hooks, toe hooks, body tension).
+            - V6 - V8 (Advanced): Very poor holds (micro-crimps, bad slopers, dual-texture). Large gaps between holds requiring powerful dynamic moves (dynos) or extreme core tension. Complex movement sequences.
+            - V9+ (Expert): Extreme physical puzzles. Minimal, razor-thin holds. Severe overhangs or pure campus moves.
+
+            When analyzing the image and the data, consider:
+            1. Distance: Calculate the visual gap between holds of the same color. Large gaps mean higher grades.
+            2. Hold Size/Shape: Identify if the holds look like easy jugs or difficult slopers/crimps.
+            3. Footholds: Check if the route has dedicated footholds (lower grade) or if the climber must smear (higher grade).
+
+            Return the analysis STRICTLY as a raw JSON object with the following structure (no markdown formatting, no ```json tags):
+            {{
               "routes": [
-                {
-                  "color": "Numele culorii (ex: Red, Blue)",
-                  "holds_ids": [lista cu numerele prizelor din acest traseu],
-                  "estimated_grade": "Gradul estimat V-scale (ex: V3)",
-                  "reasoning": "Scurtă explicație a gradului (ex: prize mici, necesită forță pe degete)"
-                }
+                {{
+                  "color": "color name (e.g., red, blue)",
+                  "holds_ids": [array of integer indexes corresponding to the input holds],
+                  "estimated_grade": "V-scale grade (e.g., V3)",
+                  "reasoning": "A short, professional explanation of why this grade was chosen, referencing hold spacing, hold types, and required technique."
+                }}
               ],
-              "overall_notes": "Sfat general pentru acest perete."
-            }
+              "overall_notes": "General advice or observation about the wall."
+            }}
             """
 
-            # 3. Trimitem la Gemini 2.5 Flash (cel mai bun pentru vizual)
+            # 4. Trimitem la Gemini 2.5 Flash
             response = self.client.models.generate_content(
                 model='gemini-2.5-flash',
                 contents=[
@@ -65,18 +85,18 @@ class GradingService:
                 )
             )
 
-            # 4. Parsăm răspunsul JSON
+            # 5. Parsăm răspunsul JSON
             result_data = json.loads(response.text)
             
-            # Pentru compatibilitate cu baza ta de date actuală, extragem cel mai greu traseu
-            # (Pe viitor poți modifica baza de date să le salveze pe toate)
             routes = result_data.get("routes", [])
+            
+            # Corectat: Returnăm 4 elemente
             if not routes:
-                return "V?", 0.0, "Gemini nu a putut forma trasee."
+                return [], "V?", 0.0, "Gemini could not form routes."
 
-            best_route = routes[0] # Luăm primul traseu (sau poți face o logică să îl iei pe cel mai greu)
+            best_route = routes[0] 
             main_grade = best_route.get("estimated_grade", "V?")
-            overall_notes = result_data.get("overall_notes", "Trasee detectate cu succes.")
+            overall_notes = result_data.get("overall_notes", "Routes detected successfully.")
 
             logger.info(f"✅ Gemini a găsit {len(routes)} trasee!")
             
@@ -100,10 +120,19 @@ class GradingService:
             # Transformăm coordonatele normalizate în pixeli reali
             cx = hold.x * width
             cy = hold.y * height
-            r = hold.radius * max(width, height)
+            
+            # Folosim width/height dacă există (pentru dreptunghiuri) sau raza ca fallback
+            if hold.width and hold.height:
+                boxW = hold.width * width
+                boxH = hold.height * height
+                r_x = boxW / 2
+                r_y = boxH / 2
+            else:
+                r_x = hold.radius * max(width, height)
+                r_y = hold.radius * max(width, height)
 
-            # Desenăm un cerc roșu
-            draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline="red", width=4)
+            # Desenăm un dreptunghi/cerc roșu (aici am lăsat elipsa pentru claritate pt modelul AI)
+            draw.ellipse([cx - r_x, cy - r_y, cx + r_x, cy + r_y], outline="red", width=4)
             
             # Scriem numărul (ID-ul) lângă priză (cu fundal negru ca să fie vizibil)
             text = str(idx)

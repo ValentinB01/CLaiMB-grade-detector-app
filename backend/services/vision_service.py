@@ -18,7 +18,7 @@ class VisionService:
         # ⚠️ AICI MODIFICI CU DATELE NOULUI TĂU MODEL DE PE ROBOFLOW UNIVERSE
         # Dacă modelul se numește "bouldering-holds-xyz" și are versiunea "3", scrii așa:
         self.project = os.environ.get("ROBOFLOW_PROJECT", "holds-tptrk-u6v1c") 
-        self.version = os.environ.get("ROBOFLOW_VERSION", "1")
+        self.version = os.environ.get("ROBOFLOW_VERSION", "2")
         
         # Construim URL-ul corect
         self.url = f"https://detect.roboflow.com/{self.project}/{self.version}"
@@ -41,7 +41,7 @@ class VisionService:
                 resp = await client.post(
                     self.url,
                     params={"api_key": self.roboflow_key},
-                    content=clean_base64, # <-- Aici era problema! Acum trimitem textul direct.
+                    content=clean_base64, 
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
 
@@ -57,20 +57,25 @@ class VisionService:
             
             holds = []
             for pred in data.get("predictions", []):
-                # Filtrăm predicțiile slabe (păstrăm doar ce e > 40% sigur)
-                if pred.get("confidence", 0) < 0.6:
+                # Filtrăm predicțiile slabe (păstrăm doar ce e >= 60% sigur)
+                if pred.get("confidence", 0) < 0.45:
                     continue
 
                 clasa_detectata = pred.get("class", "unknown").lower()
+                
+                clase_detaliate = ["crimp", "jug", "sloper", "pinch", "pocket", "volume", "holds"] # Am pus și "holds" (plural) just in case
+                if clasa_detectata in clase_detaliate:
+                    clasa_detectata = "hold"
+
                 h_type = self._map_label_to_type(clasa_detectata)
-                avg_size = (pred["width"] + pred["height"]) / 2
+                
                 holds.append(
                     HoldLocation(
                         x=pred["x"] / img_w, 
                         y=pred["y"] / img_h,
-                        width=pred["width"] / img_w,   # <--- Adăugat lățimea exactă
-                        height=pred["height"] / img_h, # <--- Adăugat înălțimea exactă
-                        radius=max(pred["width"], pred["height"]) / (2 * max(img_w, img_h)), # Păstrat fallback
+                        width=pred["width"] / img_w,   
+                        height=pred["height"] / img_h, 
+                        radius=max(pred["width"], pred["height"]) / (2 * max(img_w, img_h)), 
                         confidence=round(pred["confidence"], 3),
                         hold_type=h_type,          
                         color=clasa_detectata      
@@ -79,7 +84,6 @@ class VisionService:
             
             logger.info(f"✅ Roboflow a detectat {len(holds)} prize.")
             return holds
-
         except Exception as e:
             logger.error(f"❌ Eroare la apelul Roboflow: {e}")
             return self._fallback_holds()
