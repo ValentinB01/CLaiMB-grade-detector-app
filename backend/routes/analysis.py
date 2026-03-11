@@ -28,8 +28,12 @@ async def analyze_route(request: AnalysisRequest):
 
     # --- Pasul 2: Evaluarea (Gemini) ---
     try:
-        # Acum primim și lista completă de trasee (detected_routes)
-        detected_routes, grade, confidence, notes = await _grading.grade_route(holds, request.image_base64)
+        # Acum trimitem și wall_angle-ul citit din request către Gemini!
+        detected_routes, grade, confidence, notes = await _grading.grade_route(
+            holds=holds, 
+            image_base64=request.image_base64,
+            wall_angle=request.wall_angle
+        )
     except Exception as exc:
         logger.error(f"GradingService error: {exc}")
         detected_routes, grade, confidence, notes = [], "V?", 0.0, "Grading unavailable."
@@ -49,7 +53,7 @@ async def analyze_route(request: AnalysisRequest):
             thumbnail_base64=thumbnail,
             analyzed_at=processed_at,
             user_id=request.user_id or "guest",
-            detected_routes=detected_routes # <--- Salvăm lista completă în MongoDB!
+            detected_routes=detected_routes
         )
         await db.db.route_history.insert_one(record.dict())
         logger.info(f"Saved route record {record.analysis_id}")
@@ -65,7 +69,7 @@ async def analyze_route(request: AnalysisRequest):
         notes=notes,
         gym_name=request.gym_name or "Unknown Gym",
         processed_at=processed_at,
-        detected_routes=detected_routes # <--- Aici e magia care ajunge pe telefon!
+        detected_routes=detected_routes
     )
 
 @router.get("/analyze/{analysis_id}", response_model=AnalysisResponse)

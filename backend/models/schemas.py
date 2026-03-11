@@ -26,6 +26,7 @@ class AnalysisRequest(BaseModel):
     image_base64: str = Field(..., description="Base64-encoded JPEG image")
     gym_name: Optional[str] = Field(default="Unknown Gym")
     user_id: Optional[str] = Field(default="guest")
+    wall_angle: Optional[str] = "Vertical (0 degrees)"
 
 
 class AnalysisResponse(BaseModel):
