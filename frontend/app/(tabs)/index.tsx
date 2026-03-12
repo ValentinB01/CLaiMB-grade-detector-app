@@ -101,21 +101,32 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}
       >
         {/* Header */}
-        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>ClAImb AI Coach</Text>
-            <Text style={styles.subGreeting}>
+            <Text style={styles.numeUser}>
               {auth.currentUser?.email || 'Guest Climber'}
             </Text>
           </View>
-          <View style={styles.avatarWrap}>
-            <Text style={styles.avatarText}>
-              {auth.currentUser?.email 
-                ? auth.currentUser.email.charAt(0).toUpperCase() 
-                : 'G'}
-            </Text>
+          
+          {/* Partea dreaptă: Avatar + Buton Logout */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={styles.avatarWrap}>
+              <Text style={styles.avatarText}>
+                {auth.currentUser?.email 
+                  ? auth.currentUser.email.charAt(0).toUpperCase() 
+                  : 'G'}
+              </Text>
+            </View>
+            
+            <TouchableOpacity 
+              onPress={() => signOut(auth)}
+              style={{ padding: 8, backgroundColor: C.card, borderRadius: 8, borderWidth: 1, borderColor: C.border }}
+            >
+              <Ionicons name="log-out-outline" size={20} color={C.error} />
+            </TouchableOpacity>
           </View>
+
         </View>
 
         {/* Stats Row */}
@@ -156,7 +167,7 @@ export default function HomeScreen() {
         <View style={styles.aiBadge}>
           <View style={styles.aiBadgeDot} />
           <Text style={styles.aiBadgeText}>
-            Claude Sonnet 4-6 · Hold Detection · V-Scale Grading
+            Google Gemini 3.1 · Hold Detection · V-Scale Grading
           </Text>
         </View>
 

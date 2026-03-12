@@ -52,10 +52,10 @@ async def analyze_route(request: AnalysisRequest):
             notes=notes,
             thumbnail_base64=thumbnail,
             analyzed_at=processed_at,
-            user_id=request.user_id or "guest",
+            user_id=request.user_id if request.user_id else "guest",
             detected_routes=detected_routes
         )
-        await db.db.route_history.insert_one(record.dict())
+        await db.db.route_history.insert_one(record.model_dump())
         logger.info(f"Saved route record {record.analysis_id}")
     except Exception as exc:
         logger.warning(f"Failed to save history (non-fatal): {exc}")

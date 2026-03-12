@@ -22,16 +22,16 @@ class HoldLocation(BaseModel):
 
 
 class AnalysisRequest(BaseModel):
-    """Request payload from mobile: photo + optional metadata."""
-    image_base64: str = Field(..., description="Base64-encoded JPEG image")
-    gym_name: Optional[str] = Field(default="Unknown Gym")
-    user_id: Optional[str] = Field(default="guest")
-    wall_angle: Optional[str] = "Vertical (0 degrees)"
+    image_base64: str
+    gym_name: Optional[str] = "Unknown Gym"
+    wall_angle: Optional[str] = "vertical"
+    user_id: Optional[str] = "guest"
 
 
 class AnalysisResponse(BaseModel):
     """Contract returned to the mobile app."""
     analysis_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: Optional[str] = None
     holds: List[HoldLocation]
     grade: str = Field(..., description="V-scale grade e.g. V4")
     confidence: float = Field(..., ge=0.0, le=1.0)
@@ -41,8 +41,8 @@ class AnalysisResponse(BaseModel):
     detected_routes: List[DetectedRoute] = []
 
 class RouteRecord(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    analysis_id: str
+    id: Optional[str] = None
+    analysis_id: Optional[str] = None
     gym_name: str
     grade: str
     holds_count: int
@@ -55,4 +55,4 @@ class RouteRecord(BaseModel):
 
 class RouteHistoryResponse(BaseModel):
     routes: List[RouteRecord]
-    total: int
+    total: Optional[int] = 0

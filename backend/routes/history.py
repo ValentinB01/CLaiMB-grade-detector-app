@@ -1,6 +1,3 @@
-"""
-History routes — GET /api/history, DELETE /api/history/{id}
-"""
 import logging
 from typing import Optional
 
@@ -13,38 +10,40 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/history", response_model=RouteHistoryResponse)
-async def get_history(
-    user_id: str = Query(default="guest"),
-    limit: int = Query(default=50, le=200),
-):
-    """Return paginated route history for a user."""
-    cursor = (
-        db.db.route_history.find({"user_id": user_id}, {"_id": 0})
-        .sort("analyzed_at", -1)
-        .limit(limit)
-    )
-    docs = await cursor.to_list(length=limit)
-    routes = []
-    for doc in docs:
-        try:
-            routes.append(RouteRecord(**doc))
-        except Exception as exc:
-            logger.warning(f"Skipping malformed history doc: {exc}")
-    return RouteHistoryResponse(routes=routes, total=len(routes))
+async def get_history(user_id: str):
+    """Fetch history for a specific user."""
+    # Am standardizat numele colecției: 'route_history'
+    cursor = db.db.route_history.find({"user_id": user_id}).sort("analyzed_at", -1)
+    routes = await cursor.to_list(length=50)
+    
+    # Formatăm _id-ul de la Mongo într-un string normal
+    for route in routes:
+        if "_id" in route:
+            route["id"] = str(route["_id"])
+            del route["_id"]
+        if "user_id" not in route:
+            route["user_id"] = "guest"
+        
+    return {
+        "routes": routes,
+        "total": len(routes)
+        }
 
 
 @router.delete("/history/{record_id}")
-async def delete_history_entry(record_id: str):
-    """Delete a single history entry by its record ID."""
-    result = await db.db.route_history.delete_one({"id": record_id})    
+async def delete_history_entry(record_id: str, user_id: str):
+    """Delete a single history entry by its record ID, ensuring ownership."""
+    # Securitate: ștergem DOAR dacă traseul aparține acestui user_id
+    result = await db.db.route_history.delete_one({"id": record_id, "user_id": user_id})    
     if result.deleted_count == 0:
-        return {"deleted": False, "message": "Record not found"}
+        return {"deleted": False, "message": "Record not found or not authorized"}
     return {"deleted": True, "id": record_id}
 
 
 @router.get("/history/stats")
-async def get_stats(user_id: str = Query(default="guest")):
+async def get_stats(user_id: str): 
     """Aggregate stats: total routes, grade distribution, best grade."""
+    # L-am făcut obligatoriu (fără default="guest"), ca să fim siguri că dă datele corecte
     docs = await db.db.route_history.find({"user_id": user_id}, {"grade": 1, "_id": 0}).to_list(1000)
     if not docs:
         return {"total_routes": 0, "best_grade": None, "grades": {}}

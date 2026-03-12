@@ -1,5 +1,8 @@
+import { auth } from '../firebaseConfig'; // <-- IMPORT FOARTE IMPORTANT
+
 const BASE_URL = 'http://192.168.1.130:8000';
 // const BASE_URL = 'http://172.20.10.2:8000'
+
 export interface AnalyzePayload {
   image_base64: string;
   wall_angle?: string;
@@ -7,9 +10,17 @@ export interface AnalyzePayload {
   user_id?: string;
 }
 
+// Funcție utilitară: ia ID-ul userului curent sau pune 'guest' dacă nu e logat
+const getCurrentUserId = () => {
+  return auth.currentUser?.uid || 'guest';
+};
+
 export const analyzeRoute = async (payload: AnalyzePayload) => {
   try {
-    console.log("📡 Încerc fetch la:", `${BASE_URL}/api/analyze`);
+    const userId = getCurrentUserId(); // Luăm ID-ul real!
+    
+    console.log("📡 Încerc fetch la:", `${BASE_URL}/api/analyze`, "pentru user:", userId);
+    
     const res = await fetch(`${BASE_URL}/api/analyze`, {
       method: 'POST',
       headers: { 
@@ -19,7 +30,7 @@ export const analyzeRoute = async (payload: AnalyzePayload) => {
       body: JSON.stringify({ 
         ...payload, 
         wall_angle: payload.wall_angle || "Vertical (0 degrees)",
-        user_id: 'guest' 
+        user_id: userId // <-- Trimitem UID-ul real către Backend
       }),
     });
     
@@ -37,19 +48,28 @@ export const analyzeRoute = async (payload: AnalyzePayload) => {
 };
 
 export const fetchHistory = async () => {
-  const res = await fetch(`${BASE_URL}/api/history?user_id=guest`);
+  const userId = getCurrentUserId();
+  const res = await fetch(`${BASE_URL}/api/history?user_id=${userId}`); // <-- Filtrăm după user
+  
   if (!res.ok) throw new Error(`History fetch failed: ${res.status}`);
   return res.json();
 };
 
 export const fetchStats = async () => {
-  const res = await fetch(`${BASE_URL}/api/history/stats?user_id=guest`);
+  const userId = getCurrentUserId();
+  const res = await fetch(`${BASE_URL}/api/history/stats?user_id=${userId}`); // <-- Filtrăm după user
+  
   if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
   return res.json();
 };
 
 export const deleteHistory = async (recordId: string) => {
-  const res = await fetch(`${BASE_URL}/api/history/${recordId}`, { method: 'DELETE' });
+  const userId = getCurrentUserId();
+  // Am adăugat ?user_id=${userId} aici, ca Backend-ul să știe că TU ai voie să ștergi traseul
+  const res = await fetch(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, { 
+    method: 'DELETE' 
+  });
+  
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json();
 };
