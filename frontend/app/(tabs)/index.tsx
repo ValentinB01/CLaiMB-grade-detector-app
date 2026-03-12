@@ -12,6 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { fetchStats, fetchHistory } from '../../utils/api';
+import { auth } from '../../firebaseConfig';
+import { signOut } from 'firebase/auth';
 
 const C = {
   bg: '#09090b',
@@ -99,13 +101,20 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}
       >
         {/* Header */}
+        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>ClAImb AI Coach</Text>
-            <Text style={styles.subGreeting}>Guest Climber 🧗</Text>
+            <Text style={styles.subGreeting}>
+              {auth.currentUser?.email || 'Guest Climber'}
+            </Text>
           </View>
           <View style={styles.avatarWrap}>
-            <Text style={styles.avatarText}>G</Text>
+            <Text style={styles.avatarText}>
+              {auth.currentUser?.email 
+                ? auth.currentUser.email.charAt(0).toUpperCase() 
+                : 'G'}
+            </Text>
           </View>
         </View>
 
@@ -222,6 +231,7 @@ const styles = StyleSheet.create({
   scroll: { padding: 20, paddingBottom: 40 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   greeting: { fontSize: 22, fontWeight: '800', color: C.primary, letterSpacing: -0.5 },
+  numeUser: {fontSize: 14, color: C.secondary, marginTop:4},
   subGreeting: { fontSize: 14, color: C.secondary, marginTop: 2 },
   avatarWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent + '22', borderWidth: 2, borderColor: C.accent, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 18, fontWeight: '700', color: C.accent },

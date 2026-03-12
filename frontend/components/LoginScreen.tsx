@@ -1,136 +1,69 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { useOAuth } from '@clerk/clerk-expo';
-import * as WebBrowser from 'expo-web-browser';
-import { Ionicons } from '@expo/vector-icons';
-import { useWarmUpBrowser } from '../utils/useWarmUpBrowser'; // Îl vom crea imediat
-
-// Asta e necesar pentru a închide corect browser-ul după logarea cu Google pe Android/iOS
-WebBrowser.maybeCompleteAuthSession();
-
-const C = {
-  bg: '#09090b',
-  card: '#18181b',
-  primary: '#fafafa',
-  secondary: '#a1a1aa',
-  accent: '#22d3ee', // Albastrul tău Cyan
-};
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../firebaseConfig';
 
 export default function LoginScreen() {
-  // Hook pentru a încălzi browserul (face deschiderea instantanee)
-  useWarmUpBrowser();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isLogin, setIsLogin] = useState(true);
 
-  const { startOAuthFlow } = useOAuth({ strategy: 'oauth_google' });
-  const [isLoading, setIsLoading] = React.useState(false);
-
-  const onPressGoogle = React.useCallback(async () => {
+  const handleAuth = async () => {
+    if (!email || !password) return alert('Te rog introdu email și parola!');
+    setLoading(true);
     try {
-      setIsLoading(true);
-      const { createdSessionId, setActive } = await startOAuthFlow();
-
-      if (createdSessionId && setActive) {
-        // Logarea a reușit! Setăm sesiunea activă.
-        await setActive({ session: createdSessionId });
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
       }
-    } catch (err) {
-      console.error('OAuth error:', err);
+    } catch (error: any) {
+      alert('Eroare: ' + error.message);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  }, [startOAuthFlow]);
+  };
 
   return (
     <View style={styles.container}>
-      <View style={styles.hero}>
-        <View style={styles.iconRing}>
-          <Ionicons name="analytics" size={60} color={C.accent} />
-        </View>
-        <Text style={styles.title}>CLaiMB</Text>
-        <Text style={styles.subtitle}>Your AI Bouldering Coach</Text>
-      </View>
+      <Text style={styles.title}>CLaiMB</Text>
+      <Text style={styles.subtitle}>{isLogin ? 'Loghează-te pentru a continua' : 'Creează un cont nou'}</Text>
+      
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        placeholderTextColor="#a1a1aa"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Parolă"
+        placeholderTextColor="#a1a1aa"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+      />
 
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={styles.googleBtn}
-          onPress={onPressGoogle}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#09090b" />
-          ) : (
-            <>
-              <Ionicons name="logo-google" size={20} color="#09090b" />
-              <Text style={styles.googleBtnText}>Continue with Google</Text>
-            </>
-          )}
-        </TouchableOpacity>
-        <Text style={styles.termsText}>
-          By continuing, you agree to our Terms of Service and Privacy Policy.
-        </Text>
-      </View>
+      <TouchableOpacity style={styles.button} onPress={handleAuth} disabled={loading}>
+        {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.buttonText}>{isLogin ? 'Intră' : 'Înregistrează-te'}</Text>}
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={{ marginTop: 20 }}>
+        <Text style={styles.linkText}>{isLogin ? 'Nu ai cont? Creează unul.' : 'Ai deja cont? Loghează-te.'}</Text>
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: C.bg,
-    justifyContent: 'space-between',
-    padding: 24,
-  },
-  hero: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  iconRing: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(34,211,238,0.1)',
-    borderWidth: 2,
-    borderColor: C.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 42,
-    fontWeight: '900',
-    color: C.primary,
-    letterSpacing: 2,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: C.secondary,
-    textAlign: 'center',
-  },
-  footer: {
-    width: '100%',
-    gap: 20,
-    paddingBottom: 40,
-  },
-  googleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    backgroundColor: C.accent,
-    borderRadius: 9999,
-    paddingVertical: 18,
-    width: '100%',
-  },
-  googleBtnText: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#09090b',
-  },
-  termsText: {
-    color: '#52525b',
-    fontSize: 12,
-    textAlign: 'center',
-    lineHeight: 18,
-  },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#09090b', padding: 20 },
+  title: { fontSize: 40, fontWeight: 'bold', color: 'white', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: '#a1a1aa', marginBottom: 40, textAlign: 'center' },
+  input: { width: '100%', backgroundColor: '#27272a', color: 'white', padding: 15, borderRadius: 10, marginBottom: 15 },
+  button: { backgroundColor: '#ffffff', paddingVertical: 15, paddingHorizontal: 30, borderRadius: 10, width: '100%', alignItems: 'center' },
+  buttonText: { color: '#000000', fontSize: 18, fontWeight: 'bold' },
+  linkText: { color: '#a1a1aa', fontSize: 14, textDecorationLine: 'underline' }
 });
