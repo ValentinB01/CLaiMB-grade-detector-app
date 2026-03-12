@@ -1,6 +1,8 @@
 const BASE_URL = 'http://192.168.1.130:8000';
+// const BASE_URL = 'http://172.20.10.2:8000'
 export interface AnalyzePayload {
   image_base64: string;
+  wall_angle?: string;
   gym_name: string;
   user_id?: string;
 }
@@ -12,9 +14,13 @@ export const analyzeRoute = async (payload: AnalyzePayload) => {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Accept': 'application/json' // <--- ADAUGĂ ACEASTĂ LINIE
+        'Accept': 'application/json'
       },
-      body: JSON.stringify({ ...payload, user_id: 'guest' }),
+      body: JSON.stringify({ 
+        ...payload, 
+        wall_angle: payload.wall_angle || "Vertical (0 degrees)",
+        user_id: 'guest' 
+      }),
     });
     
     if (!res.ok) {

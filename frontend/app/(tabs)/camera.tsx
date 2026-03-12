@@ -9,6 +9,7 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -28,6 +29,16 @@ const C = {
   accent: '#22d3ee',
 };
 
+// Definim opțiunile de unghiuri pentru fiecare tip
+const WALL_TYPES = [
+  { label: 'Inclined', value: 'inclined' },
+  { label: 'Vertical', value: 'vertical' },
+  { label: 'Overhang', value: 'overhang' }
+];
+
+const OVERHANG_DEGREES = [5, 10, 15, 20, 30, 40, 45, 50, 60];
+const SLAB_DEGREES = [5, 10, 15, 20, 25, 30];
+
 export default function CameraScreen() {
   const router = useRouter();
   const cameraRef = useRef<CameraView>(null);
@@ -36,6 +47,17 @@ export default function CameraScreen() {
   const [flash, setFlash] = useState<'off' | 'on'>('off');
   const [gymName, setGymName] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // State-uri pentru unghiul dinamic
+  const [wallType, setWallType] = useState<'inclined' | 'vertical' | 'overhang'>('vertical');
+  const [wallDegree, setWallDegree] = useState<number>(0);
+
+  // Funcție care construiește string-ul final pentru Gemini
+  const getWallAngleString = () => {
+    if (wallType === 'vertical') return "Vertical (0 degrees)";
+    if (wallType === 'inclined') return `Inclined (leaning back ${wallDegree} degrees)`;
+    return `${wallDegree}-degree Overhang`;
+  };
 
   const handleCapture = async () => {
     if (loading) return;
@@ -88,9 +110,11 @@ export default function CameraScreen() {
 
   const submitAnalysis = async (base64: string) => {
     try {
+      const finalAngle = getWallAngleString();
       const result = await analyzeRoute({
         image_base64: base64,
         gym_name: gymName.trim() || 'Unknown Gym',
+        wall_angle: finalAngle, // Trimitem textul curat către backend
       });
       setPendingResult({ ...result, image_base64: base64 });
       router.push('/result');
@@ -99,6 +123,14 @@ export default function CameraScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Funcție de schimbare a tipului de perete și resetare a gradelor default
+  const handleTypeChange = (type: 'inclined' | 'vertical' | 'overhang') => {
+    setWallType(type);
+    if (type === 'vertical') setWallDegree(0);
+    else if (type === 'inclined') setWallDegree(10);
+    else setWallDegree(30);
   };
 
   // --- WEB: no CameraView ---
@@ -113,6 +145,39 @@ export default function CameraScreen() {
               </View>
               <Text style={styles.webTitle}>Scan a Route</Text>
               <Text style={styles.webSub}>Upload a climbing wall photo for AI analysis</Text>
+            </View>
+
+            {/* Selector Unghi Web */}
+            <View style={styles.angleContainerWeb}>
+              <Text style={styles.angleTitle}>Wall Angle:</Text>
+              <View style={styles.angleButtons}>
+                {WALL_TYPES.map((t) => (
+                  <TouchableOpacity
+                    key={t.value}
+                    style={[styles.angleBtn, wallType === t.value && styles.angleBtnActive]}
+                    onPress={() => handleTypeChange(t.value as any)}
+                  >
+                    <Text style={[styles.angleBtnText, wallType === t.value && styles.angleBtnTextActive]}>
+                      {t.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              {/* Sub-meniu grade Web */}
+              {wallType !== 'vertical' && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.degreeScrollWeb} contentContainerStyle={{ gap: 8 }}>
+                  {(wallType === 'overhang' ? OVERHANG_DEGREES : SLAB_DEGREES).map(deg => (
+                    <TouchableOpacity 
+                      key={deg} 
+                      style={[styles.degBtn, wallDegree === deg && styles.degBtnActive]}
+                      onPress={() => setWallDegree(deg)}
+                    >
+                      <Text style={[styles.degBtnText, wallDegree === deg && styles.degBtnTextActive]}>{deg}°</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </View>
 
             <View style={styles.gymInputWrap}>
@@ -132,7 +197,6 @@ export default function CameraScreen() {
               style={styles.ctaBtn}
               onPress={pickFromGallery}
               disabled={loading}
-              activeOpacity={0.85}
             >
               {loading ? (
                 <ActivityIndicator color="#09090b" />
@@ -143,13 +207,6 @@ export default function CameraScreen() {
                 </>
               )}
             </TouchableOpacity>
-
-            {loading && (
-              <View style={styles.analyzingBanner}>
-                <ActivityIndicator color={C.accent} size="small" />
-                <Text style={styles.analyzingText}>Claude is analyzing your route…</Text>
-              </View>
-            )}
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -158,29 +215,17 @@ export default function CameraScreen() {
 
   // --- Native: Full CameraView ---
   if (!permission) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator color={C.accent} />
-      </View>
-    );
+    return <View style={styles.container}><ActivityIndicator color={C.accent} /></View>;
   }
 
   if (!permission.granted) {
     return (
-      <SafeAreaView style={styles.container} testID="camera-permission-screen">
+      <SafeAreaView style={styles.container}>
         <View style={styles.permissionContainer}>
           <Ionicons name="camera-outline" size={72} color={C.accent} />
           <Text style={styles.permTitle}>Camera Access Needed</Text>
-          <Text style={styles.permSub}>Point your phone at a climbing wall to scan and grade the route.</Text>
-          <TouchableOpacity
-            testID="grant-camera-btn"
-            style={styles.ctaBtn}
-            onPress={requestPermission}
-          >
+          <TouchableOpacity style={styles.ctaBtn} onPress={requestPermission}>
             <Text style={styles.ctaBtnText}>GRANT ACCESS</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.galleryFallback} onPress={pickFromGallery} testID="use-gallery-btn">
-            <Text style={styles.galleryFallbackText}>Use Gallery Instead</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -189,37 +234,22 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container} testID="camera-screen-native">
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing={facing}
-        flash={flash}
-      />
+      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} flash={flash} />
 
       {/* Top controls */}
       <SafeAreaView style={styles.topBar}>
-        <TouchableOpacity
-          testID="flash-toggle-btn"
-          style={styles.iconBtn}
-          onPress={() => setFlash(f => (f === 'off' ? 'on' : 'off'))}
-        >
+        <TouchableOpacity style={styles.iconBtn} onPress={() => setFlash(f => (f === 'off' ? 'on' : 'off'))}>
           <Ionicons name={flash === 'on' ? 'flash' : 'flash-off'} size={22} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity
-          testID="flip-camera-btn"
-          style={styles.iconBtn}
-          onPress={() => setFacing(f => (f === 'back' ? 'front' : 'back'))}
-        >
+        <TouchableOpacity style={styles.iconBtn} onPress={() => setFacing(f => (f === 'back' ? 'front' : 'back'))}>
           <Ionicons name="camera-reverse" size={22} color="#fff" />
         </TouchableOpacity>
       </SafeAreaView>
 
-      {/* Instruction */}
       <View style={styles.instruction} pointerEvents="none">
         <Text style={styles.instructionText}>Align the climbing wall in frame</Text>
       </View>
 
-      {/* Corner markers */}
       <View style={styles.frame} pointerEvents="none">
         {['tl', 'tr', 'bl', 'br'].map((corner) => (
           <View
@@ -233,28 +263,48 @@ export default function CameraScreen() {
         ))}
       </View>
 
+      {/* Selector de Unghi Plutitor */}
+      <View style={styles.angleContainerNative}>
+        <View style={styles.angleButtons}>
+          {WALL_TYPES.map((t) => (
+            <TouchableOpacity
+              key={t.value}
+              style={[styles.angleBtnNative, wallType === t.value && styles.angleBtnActiveNative]}
+              onPress={() => handleTypeChange(t.value as any)}
+            >
+              <Text style={[styles.angleBtnTextNative, wallType === t.value && styles.angleBtnTextActive]}>
+                {t.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
+        {/* Sub-meniul orizontal cu grade (doar pe Native) */}
+        {wallType !== 'vertical' && (
+          <View style={styles.degreeWrapperNative}>
+             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20 }}>
+              {(wallType === 'overhang' ? OVERHANG_DEGREES : SLAB_DEGREES).map(deg => (
+                <TouchableOpacity 
+                  key={deg} 
+                  style={[styles.degBtnNative, wallDegree === deg && styles.degBtnActiveNative]}
+                  onPress={() => setWallDegree(deg)}
+                >
+                  <Text style={[styles.degBtnTextNative, wallDegree === deg && styles.degBtnTextActiveNative]}>{deg}°</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+      </View>
+
       {/* Bottom controls */}
       <View style={styles.bottomBar}>
-        <TouchableOpacity
-          testID="gallery-btn"
-          style={styles.galleryBtn}
-          onPress={pickFromGallery}
-          disabled={loading}
-        >
+        <TouchableOpacity style={styles.galleryBtn} onPress={pickFromGallery} disabled={loading}>
           <Ionicons name="images-outline" size={26} color="#fff" />
         </TouchableOpacity>
 
-        <TouchableOpacity
-          testID="shutter-btn"
-          style={[styles.shutter, loading && styles.shutterDisabled]}
-          onPress={handleCapture}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#09090b" size="large" />
-          ) : (
-            <View style={styles.shutterInner} />
-          )}
+        <TouchableOpacity style={[styles.shutter, loading && styles.shutterDisabled]} onPress={handleCapture} disabled={loading}>
+          {loading ? <ActivityIndicator color="#09090b" size="large" /> : <View style={styles.shutterInner} />}
         </TouchableOpacity>
 
         <View style={{ width: 56 }} />
@@ -270,7 +320,6 @@ export default function CameraScreen() {
             placeholderTextColor={C.muted}
             value={gymName}
             onChangeText={setGymName}
-            testID="gym-name-input-native"
           />
         </View>
       </KeyboardAvoidingView>
@@ -278,7 +327,7 @@ export default function CameraScreen() {
       {loading && (
         <View style={styles.loadingOverlay} pointerEvents="none">
           <ActivityIndicator color={C.accent} size="large" />
-          <Text style={styles.loadingText}>Analyzing with Claude AI…</Text>
+          <Text style={styles.loadingText}>Coach AI is analyzing…</Text>
         </View>
       )}
     </View>
@@ -287,7 +336,6 @@ export default function CameraScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  // Web
   webContainer: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 24 },
   webHero: { alignItems: 'center', gap: 12 },
   webIconRing: { width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, borderColor: C.accent, alignItems: 'center', justifyContent: 'center' },
@@ -297,15 +345,8 @@ const styles = StyleSheet.create({
   gymInput: { flex: 1, color: C.primary, fontSize: 15 },
   ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accent, borderRadius: 9999, paddingVertical: 16, paddingHorizontal: 40, width: '100%', maxWidth: 400 },
   ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#09090b', letterSpacing: 1 },
-  analyzingBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card, borderRadius: 12, padding: 16 },
-  analyzingText: { color: C.accent, fontSize: 14 },
-  // Permission
   permissionContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
   permTitle: { fontSize: 22, fontWeight: '700', color: C.primary, textAlign: 'center' },
-  permSub: { fontSize: 14, color: C.secondary, textAlign: 'center', lineHeight: 22 },
-  galleryFallback: { paddingVertical: 12 },
-  galleryFallbackText: { color: C.secondary, fontSize: 14 },
-  // Native camera
   topBar: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'flex-end', gap: 12, paddingHorizontal: 20, paddingTop: 8, zIndex: 10 },
   iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
   instruction: { position: 'absolute', top: '12%', left: 0, right: 0, alignItems: 'center' },
@@ -325,4 +366,30 @@ const styles = StyleSheet.create({
   gymInputNative: { flex: 1, color: '#fff', fontSize: 13 },
   loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(9,9,11,0.85)', alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: { color: C.accent, fontSize: 16, fontWeight: '600' },
+  
+  // Stiluri Angle Selector Web
+  angleContainerWeb: { alignItems: 'center', marginBottom: 12, width: '100%', maxWidth: 400 },
+  angleTitle: { color: C.secondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
+  angleButtons: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
+  angleBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: C.card },
+  angleBtnActive: { borderColor: C.accent, backgroundColor: 'rgba(34,211,238,0.1)' },
+  angleBtnText: { color: C.secondary, fontSize: 14, fontWeight: '600' },
+  angleBtnTextActive: { color: C.accent },
+  degreeScrollWeb: { marginTop: 12, width: '100%' },
+  degBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, backgroundColor: C.border },
+  degBtnActive: { backgroundColor: C.accent },
+  degBtnText: { color: C.secondary, fontSize: 13, fontWeight: '600' },
+  
+  // Stiluri Angle Selector Native (Peste cameră)
+  angleContainerNative: { position: 'absolute', bottom: 220, left: 0, right: 0, alignItems: 'center' },
+  angleBtnNative: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: 'transparent' },
+  angleBtnActiveNative: { borderColor: C.accent, backgroundColor: 'rgba(34,211,238,0.2)' },
+  angleBtnTextNative: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
+  
+  // Design-ul pentru butoanele de grade de pe telefon
+  degreeWrapperNative: { width: '100%', marginTop: 12, height: 36 },
+  degBtnNative: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: '#52525b' },
+  degBtnActiveNative: { backgroundColor: C.accent, borderColor: C.accent },
+  degBtnTextNative: { color: '#a1a1aa', fontSize: 13, fontWeight: '700' },
+  degBtnTextActiveNative: { color: '#09090b' },
 });

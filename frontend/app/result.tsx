@@ -76,13 +76,15 @@ export default function ResultScreen() {
   const [imgLayout, setImgLayout] = useState({ width: 0, height: 0 });
   const [selectedHold, setSelectedHold] = useState<HoldLocation | null>(null);
   
+  // NOU: State pentru a păstra aspect ratio-ul dinamic (fallback la 3/4)
+  const [imgAspect, setImgAspect] = useState<number>(3 / 4);
+  
   // State pentru slider-ul de trasee
   const [activeRouteIdx, setActiveRouteIdx] = useState(0);
 
   useEffect(() => {
     const r = getPendingResult();
     if (r) setResult(r);
-    // Opțional: clearPendingResult() la unmount dacă nu vrei să păstrezi datele
   }, []);
 
   if (!result) {
@@ -99,14 +101,11 @@ export default function ResultScreen() {
     );
   }
 
-  // Logica pentru rute multiple (Fallback pe array gol dacă lipsesc datele)
   const routes = result.detected_routes || [];
   const hasRoutes = routes.length > 0;
-  // Ne asigurăm că indexul nu e mai mare decât array-ul dacă se schimbă rezultatul brusc
   const validRouteIdx = activeRouteIdx < routes.length ? activeRouteIdx : 0;
   const currentRoute = hasRoutes ? routes[validRouteIdx] : null;
 
-  // Valorile afișate se schimbă în funcție de traseul selectat
   const displayGrade = currentRoute ? currentRoute.estimated_grade : result.grade;
   const displayNotes = currentRoute ? currentRoute.reasoning : result.notes;
   const gColor = gradeColor(displayGrade);
@@ -135,8 +134,19 @@ export default function ResultScreen() {
         {/* Imagine + Overlays */}
         <View style={styles.imageContainer}>
           {imageUri ? (
-            <View onLayout={onImageLayout} style={styles.imageWrap}>
-              <Image source={{ uri: imageUri }} style={styles.image} resizeMode="cover" />
+            <View onLayout={onImageLayout} style={[styles.imageWrap, { aspectRatio: imgAspect }]}>
+              <Image 
+                source={{ uri: imageUri }} 
+                style={styles.image} 
+                resizeMode="cover" 
+                // NOU: Citim lățimea și înălțimea la încărcarea imaginii
+                onLoad={(e) => {
+                  const { width, height } = e.nativeEvent.source;
+                  if (width && height) {
+                    setImgAspect(width / height);
+                  }
+                }}
+              />
               
               {imgLayout.width > 0 && result.holds && result.holds.length > 0 && (
                 <Svg
@@ -148,17 +158,12 @@ export default function ResultScreen() {
                     const cx = hold.x * imgLayout.width;
                     const cy = hold.y * imgLayout.height;
                     
-                    // 1. Luăm dimensiunile exacte trimise de Roboflow
                     const baseW = hold.width ? hold.width * imgLayout.width : hold.radius * 2 * imgLayout.width;
                     const baseH = hold.height ? hold.height * imgLayout.height : hold.radius * 2 * imgLayout.height;
                     
-                    // 2. AICI ESTE TRUCUL: Facem cutia cu 10% mai mică vizual!
-                    // Astfel, nu va mai atinge marginile și va părea mai precisă.
-                    const boxW = baseW * 0.90; // 90% din lățimea originală
-                    const boxH = baseH * 0.90; // 90% din înălțimea originală
+                    const boxW = baseW * 0.90; 
+                    const boxH = baseH * 0.90; 
 
-                    // 3. Calculăm recentrarea (re-alinierea punctului de start)
-                    // (Recentrare necesară pentru că în SVG desenăm din colțul stânga-sus)
                     const rectX = cx - boxW / 2;
                     const rectY = cy - boxH / 2;
                     
@@ -180,13 +185,13 @@ export default function ResultScreen() {
                           stroke={drawColor}
                           strokeWidth={isSelected ? 3 : 2}
                           opacity={opacity}
-                          rx={4} // Un mic radius la colțuri ca să arate mai profesional
+                          rx={4} 
                           onPress={() => setSelectedHold(isSelected ? null : hold)}
                         />
                         {isSelected && isInActiveRoute && (
                           <SvgText
                             x={cx}
-                            y={rectY - 6} // Mutăm textul deasupra dreptunghiului
+                            y={rectY - 6}
                             fontSize={10}
                             fill={drawColor}
                             textAnchor="middle"
@@ -324,20 +329,19 @@ const styles = StyleSheet.create({
   topTitle: { fontSize: 16, fontWeight: '700', color: C.primary },
   scroll: { paddingBottom: 40 },
   imageContainer: { position: 'relative', marginHorizontal: 16, borderRadius: 16, overflow: 'hidden', marginBottom: 12 },
-  imageWrap: { width: '100%', aspectRatio: 9 / 16 },
+  
+  // NOU: Am șters aspectRatio de aici, acum este doar 100% lățime (înălțimea e calculată de aspect ratio dinamic)
+  imageWrap: { width: '100%' }, 
+  
   image: { width: '100%', height: '100%' },
   gradeBadgeOverlay: { position: 'absolute', top: 16, right: 16, borderWidth: 2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
   gradeOverlayText: { fontSize: 28, fontWeight: '900' },
-  
-  // Stiluri Slider Trasee
   routeSelector: { marginBottom: 16 },
   selectorTitle: { fontSize: 11, color: C.secondary, marginLeft: 16, marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' },
   routeList: { paddingHorizontal: 16, gap: 12 },
   routeCard: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#1c1c1f', borderRadius: 14, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', minWidth: 100 },
   routeColorText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   routeGradeText: { fontSize: 22, fontWeight: '900', marginTop: 2 },
-
-  // Alte componente
   holdInfoCard: { marginHorizontal: 16, backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: C.accent + '44' },
   holdInfoTitle: { fontSize: 14, fontWeight: '700', color: C.primary },
   holdInfoText: { fontSize: 12, color: C.secondary, marginTop: 2 },
