@@ -46,25 +46,24 @@ The repository is divided into two main environments:
 ```
 
 ## 🚀 Getting Started
-Prerequisites
-Node.js & npm (or yarn/bun)
 
-Python 3.9+
+**Prerequisites**
+* Node.js & npm (or yarn/bun)
+* Python 3.9+
+* Expo Go app installed on your mobile device
+* API Keys for the Vision services (set in .env)
 
-Expo Go app installed on your mobile device
-
-API Keys for the Vision services (set in .env)
-
-1. Backend Setup
-$ cd backend
-$ python -m venv venv
-$ source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-$ pip install -r requirements.txt
-
-# Start the FastAPI server
+## 1. Backend Setup
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+pip install -r requirements.txt
+```
+## Start the FastAPI server
 $ uvicorn server:app --reload
 
-# In a separate terminal, start the background worker
+## In a separate terminal, start the background worker
 $ celery -A worker worker --loglevel=info
 
 2. Frontend Setup
