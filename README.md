@@ -25,7 +25,7 @@ The system uses a modern **Service-Oriented Architecture (SOA)** with a React Na
 * Python 3.x
 * FastAPI (Service-Oriented Architecture)
 * Celery & Redis (Asynchronous background task processing)
-* AI/ML: Claude Vision / Roboflow integration
+* AI/ML: Google Gemini / Roboflow integration
 
 ## 📂 Project Architecture
 
@@ -43,3 +43,35 @@ The repository is divided into two main environments:
     ├── models/               # Database schemas and Pydantic models
     ├── tasks.py & worker.py  # Asynchronous job processing (Celery)
     └── server.py             # FastAPI application entry point
+```
+
+## 🚀 Getting Started
+Prerequisites
+Node.js & npm (or yarn/bun)
+
+Python 3.9+
+
+Expo Go app installed on your mobile device
+
+API Keys for the Vision services (set in .env)
+
+1. Backend Setup
+$ cd backend
+$ python -m venv venv
+$ source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+$ pip install -r requirements.txt
+
+# Start the FastAPI server
+$ uvicorn server:app --reload
+
+# In a separate terminal, start the background worker
+$ celery -A worker worker --loglevel=info
+
+2. Frontend Setup
+$ cd frontend
+$ npm install
+
+# Start the Expo development server
+$ npx expo start
+
+Scan the QR code generated in the terminal using the Expo Go app on your phone to view the app.
