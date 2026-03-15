@@ -1,7 +1,9 @@
 import { initializeApp } from 'firebase/app';
-// Folosim un sistem de auth special conceput pentru React Native / Expo care memorează login-ul
-import { initializeAuth, getReactNativePersistence } from 'firebase/auth';
+// Adaugă browserLocalPersistence în importul de la Firebase
+// @ts-ignore
+import { initializeAuth, getReactNativePersistence, browserLocalPersistence } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native'; // Importăm Platform pentru a verifica unde rulăm
 
 // Aici vei pune datele tale din consola Firebase (le putem pune mai târziu, acum doar pregătim terenul)
 const firebaseConfig = {
@@ -16,6 +18,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Așa îi spunem Firebase-ului să țină minte user-ul chiar dacă închide aplicația
-export const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage)
+const auth = initializeAuth(app, {
+  persistence: Platform.OS === 'web'
+    ? browserLocalPersistence
+    : getReactNativePersistence(AsyncStorage)
 });
+
+export { auth };
