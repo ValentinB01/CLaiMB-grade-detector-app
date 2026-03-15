@@ -45,9 +45,15 @@ The repository is divided into two main environments:
     └── server.py             # FastAPI application entry point
 ```
 
+
+
 <p align="center">
   <img src="assets/poza1.jpg" alt="Ecran Login" width="250"/>
+</p>
+<p align="center">
   <img src="assets/poza2.jpg" alt="Grade Estimator and AI Coach" width="250" />
+</p>
+<p align="center">
   <img src="assets/poza3.jpg" alt="Holds detection" width="250" />
 </p>
 
