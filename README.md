@@ -77,4 +77,4 @@ npm install
 ```bash
 npx expo start
 ```
-** Scan the QR code generated in the terminal using the Expo Go app on your phone to view the app. **
+**Scan the QR code generated in the terminal using the Expo Go app on your phone to view the app.**
