@@ -4,7 +4,7 @@
 
 ## 📖 Overview
 
-ClAImb is built for climbers who want to push their limits. By leveraging advanced Vision AI (Claude Sonnet Vision / Roboflow), the app analyzes user-uploaded photos of climbing walls to detect holds, suggest route grades, and act as a digital climbing coach. 
+ClAImb is built for climbers who want to push their limits. By leveraging advanced Vision AI (Roboflow), the app analyzes user-uploaded photos of climbing walls to detect holds, suggest route grades, and act as a digital climbing coach. 
 
 The system uses a modern **Service-Oriented Architecture (SOA)** with a React Native frontend and a scalable FastAPI backend running asynchronous background workers.
 
