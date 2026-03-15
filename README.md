@@ -45,7 +45,7 @@ The repository is divided into two main environments:
     └── server.py             # FastAPI application entry point
 ```
 
-
+## 👁️ Overview
 
 <p align="center">
   <img src="assets/poza1.jpg" alt="Ecran Login" width="250"/>
