@@ -53,24 +53,28 @@ The repository is divided into two main environments:
 * Expo Go app installed on your mobile device
 * API Keys for the Vision services (set in .env)
 
-## 1. Backend Setup
+## Backend Setup
 ```bash
 cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows use `venv\Scripts\activate`
 pip install -r requirements.txt
 ```
-## Start the FastAPI server
+### Start the FastAPI server
+```bash
 $ uvicorn server:app --reload
-
-## In a separate terminal, start the background worker
+```
+### In a separate terminal, start the background worker
+```bash
 $ celery -A worker worker --loglevel=info
-
-2. Frontend Setup
-$ cd frontend
-$ npm install
-
-# Start the Expo development server
-$ npx expo start
-
-Scan the QR code generated in the terminal using the Expo Go app on your phone to view the app.
+```
+## Frontend Setup
+```bash
+cd frontend
+npm install
+```
+### Start the Expo development server
+```bash
+npx expo start
+```
+** Scan the QR code generated in the terminal using the Expo Go app on your phone to view the app. **
