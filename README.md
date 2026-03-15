@@ -50,7 +50,7 @@ The repository is divided into two main environments:
 | Wall Analysis | Grade Estimation | AI Coaching |
 | :---: | :---: | :---: |
 
-| <img src="" width="250"/> | <img src="docs/images/screenshot2.jpg" width="250"/> | <img src="docs/images/screenshot3.jpg" width="250"/> |
+
 
 ## 🚀 Getting Started
 
