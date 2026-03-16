@@ -1,6 +1,6 @@
 import { auth } from '../firebaseConfig'; // <-- IMPORT FOARTE IMPORTANT
 
-const BASE_URL = 'http://192.168.1.130:8000';
+const BASE_URL = 'http://192.168.56.1:8000';
 // const BASE_URL = 'http://172.20.10.2:8000'
 
 export interface AnalyzePayload {
@@ -71,5 +71,25 @@ export const deleteHistory = async (recordId: string) => {
   });
   
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+  return res.json();
+};
+
+export const updateHistoryStatus = async (
+  recordId: string,
+  status: 'Project' | 'Sent' | 'Topped'
+) => {
+  const userId = getCurrentUserId();
+
+  const res = await fetch(
+    `${BASE_URL}/api/history/${recordId}/status?user_id=${userId}&status=${status}`,
+    {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+      },
+    }
+  );
+
+  if (!res.ok) throw new Error(`Status update failed: ${res.status}`);
   return res.json();
 };

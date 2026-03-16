@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { fetchHistory, deleteHistory } from '../../utils/api';
+import { fetchHistory, deleteHistory, updateHistoryStatus } from '../../utils/api';
 
 const C = {
   bg: '#09090b',
@@ -34,6 +34,7 @@ interface RouteRecord {
   confidence: number;
   notes: string;
   analyzed_at: string;
+  status: 'Project' | 'Sent' | 'Topped';
 }
 
 export default function HistoryScreen() {
@@ -71,6 +72,19 @@ export default function HistoryScreen() {
       },
     ]);
   };
+
+  const handleStatusChange = async (id: string, status: 'Project' | 'Sent' | 'Topped') => {
+  try {
+    await updateHistoryStatus(id, status);
+    setRoutes(prev =>
+      prev.map(route =>
+        route.id === id ? { ...route, status } : route
+      )
+    );
+  } catch {
+    Alert.alert('Error', 'Could not update route status.');
+  }
+};
 
   const gradeColor = (grade: string) => {
     const n = parseInt(grade.replace('V', ''));
@@ -145,6 +159,34 @@ export default function HistoryScreen() {
                 <MetricChip icon="shield-checkmark-outline" label={`${Math.round(item.confidence * 100)}% conf.`} />
               </View>
 
+              <View style={styles.statusSection}>
+  <Text style={styles.statusLabel}>Status</Text>
+  <View style={styles.statusRow}>
+    {(['Project', 'Sent', 'Topped'] as const).map(statusOption => {
+      const isActive = item.status === statusOption;
+      return (
+        <TouchableOpacity
+          key={statusOption}
+          style={[
+            styles.statusBtn,
+            isActive && styles.statusBtnActive,
+          ]}
+          onPress={() => handleStatusChange(item.id, statusOption)}
+        >
+          <Text
+            style={[
+              styles.statusBtnText,
+              isActive && styles.statusBtnTextActive,
+            ]}
+          >
+            {statusOption}
+          </Text>
+        </TouchableOpacity>
+      );
+    })}
+  </View>
+</View>
+
               {/* Notes */}
               {item.notes ? (
                 <View style={styles.notesWrap}>
@@ -170,6 +212,39 @@ function MetricChip({ icon, label }: { icon: any; label: string }) {
 }
 
 const styles = StyleSheet.create({
+  statusSection: {
+  marginBottom: 10,
+},
+statusLabel: {
+  fontSize: 12,
+  color: C.secondary,
+  marginBottom: 6,
+  fontWeight: '600',
+},
+statusRow: {
+  flexDirection: 'row',
+  gap: 8,
+},
+statusBtn: {
+  paddingHorizontal: 12,
+  paddingVertical: 6,
+  borderRadius: 999,
+  backgroundColor: C.border,
+  borderWidth: 1,
+  borderColor: C.border,
+},
+statusBtnActive: {
+  backgroundColor: 'rgba(34,211,238,0.14)',
+  borderColor: C.accent,
+},
+statusBtnText: {
+  fontSize: 12,
+  color: C.secondary,
+  fontWeight: '600',
+},
+statusBtnTextActive: {
+  color: C.accent,
+},
   container: { flex: 1, backgroundColor: C.bg },
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 },
   title: { fontSize: 24, fontWeight: '800', color: C.primary },
