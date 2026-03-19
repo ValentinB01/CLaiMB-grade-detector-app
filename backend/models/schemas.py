@@ -27,6 +27,7 @@ class HoldLocation(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     hold_type: str = Field(default="hand", description="start | finish | hand | foot")
     color: Optional[str] = Field(default="unknown")
+    polygon: Optional[List[dict]] = None
 
 
 class AnalysisRequest(BaseModel):
@@ -67,3 +68,41 @@ class RouteRecord(BaseModel):
 class RouteHistoryResponse(BaseModel):
     routes: List[RouteRecord]
     total: Optional[int] = 0
+
+
+# ---------------------------------------------------------------------------
+# Spray Wall Feature Schemas
+# ---------------------------------------------------------------------------
+class DetectRequest(BaseModel):
+    """Step 1: Detect holds only — no grading."""
+    image_base64: str
+    user_id: Optional[str] = "guest"
+
+
+class DetectResponse(BaseModel):
+    """Returns all detected holds for spray wall selection."""
+    detect_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    holds: List[HoldLocation]
+    holds_count: int
+
+
+class GradeSelectionRequest(BaseModel):
+    """Step 2: Grade a user-selected subset of holds."""
+    image_base64: str
+    selected_hold_indices: List[int]
+    holds: List[HoldLocation]
+    wall_angle: Optional[str] = "vertical"
+    gym_name: Optional[str] = "Unknown Gym"
+    user_id: Optional[str] = "guest"
+
+
+class GradeSelectionResponse(BaseModel):
+    """Grading result for a user-defined spray wall route."""
+    analysis_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    grade: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    coaching_notes: str
+    selected_holds_count: int
+    gym_name: str
+    wall_angle: str
+    processed_at: str

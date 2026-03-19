@@ -17,6 +17,7 @@ export interface HoldLocation {
   confidence: number;
   hold_type: string;
   color?: string;
+  polygon?: { x: number; y: number }[];
 }
 
 export interface AnalysisResult {
@@ -36,3 +37,25 @@ let _pending: AnalysisResult | null = null;
 export const setPendingResult = (r: AnalysisResult) => { _pending = r; };
 export const getPendingResult = (): AnalysisResult | null => _pending;
 export const clearPendingResult = () => { _pending = null; };
+
+
+// ---------------------------------------------------------------------------
+// Spray Wall Types & State
+// ---------------------------------------------------------------------------
+export interface SprayWallDetection {
+  detect_id: string;
+  holds: HoldLocation[];
+  holds_count: number;
+  image_base64: string;
+}
+
+export interface SprayWallGradeResult {
+  analysis_id: string;
+  grade: string;
+  confidence: number;
+  coaching_notes: string;
+  selected_holds_count: number;
+  gym_name: string;
+  wall_angle: string;
+  processed_at: string;
+}

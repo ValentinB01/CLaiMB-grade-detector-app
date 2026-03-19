@@ -47,10 +47,9 @@ async def _run_analysis(image_base64: str, gym_name: str, analysis_id: str):
     holds = await vision.analyze_image(image_base64)
     grade, confidence, notes = await grading.grade_route(holds, image_base64)
 
-    mongo_url = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
-    db_name = os.environ.get("DB_NAME", "claimb_db")
-    client = AsyncIOMotorClient(mongo_url)
-    db = client[db_name]
+    from database import MONGODB_URL, DB_NAME
+    client = AsyncIOMotorClient(MONGODB_URL)
+    db = client[DB_NAME]
 
     await db.route_history.update_one(
         {"analysis_id": analysis_id},

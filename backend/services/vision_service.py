@@ -2,14 +2,18 @@ import os
 import json
 import base64
 import logging
+import io
 import httpx # Asigură-te că ai rulat: pip install httpx
 from typing import List, Optional
+from PIL import Image as PILImage, ImageOps
 from models.schemas import HoldLocation
 
 logger = logging.getLogger(__name__)
 
 class VisionService:
     """Detectează prizele de cățărat folosind exclusiv Roboflow (Gratuit)."""
+
+    MAX_DIM = 1024  # Max width/height before sending to Roboflow
 
     def __init__(self):
         # Citim cheia direct din mediu
@@ -22,6 +26,35 @@ class VisionService:
         
         # Construim URL-ul corect
         self.url = f"https://detect.roboflow.com/{self.project}/{self.version}"
+
+    def _resize_base64(self, image_base64: str) -> str:
+        """Resize image to max MAX_DIM px if larger, returns base64 string."""
+        try:
+            raw = base64.b64decode(image_base64)
+            img = PILImage.open(io.BytesIO(raw))
+            img = ImageOps.exif_transpose(img) # Fix EXIF rotation from phones
+
+            w, h = img.size
+
+            if w > self.MAX_DIM or h > self.MAX_DIM:
+                # Calculate new size preserving aspect ratio
+                ratio = min(self.MAX_DIM / w, self.MAX_DIM / h)
+                new_w, new_h = int(w * ratio), int(h * ratio)
+                img = img.resize((new_w, new_h), PILImage.LANCZOS)
+                w, h = new_w, new_h
+
+            # Convert to RGB to avoid "cannot write mode RGBA as JPEG" error
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+            resized_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            logger.info(f"📐 Resized/Oriented image to {w}x{h} (b64 len: {len(image_base64)} → {len(resized_b64)})")
+            return resized_b64
+        except Exception as e:
+            logger.warning(f"⚠️ Resize failed, using original: {e}")
+            return image_base64
 
     async def analyze_image(self, image_base64: str) -> List[HoldLocation]:
         """Punctul de intrare principal pentru analiza imaginii."""
@@ -37,7 +70,10 @@ class VisionService:
             # 1. Curățăm string-ul de prefixul de la telefon (ex: "data:image/jpeg;base64,...")
             clean_base64 = image_base64.split(",")[-1] if "," in image_base64 else image_base64
 
-            async with httpx.AsyncClient(timeout=20) as client:
+            # 2. Resize image to reduce upload size
+            clean_base64 = self._resize_base64(clean_base64)
+
+            async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(
                     self.url,
                     params={"api_key": self.roboflow_key},
@@ -57,8 +93,8 @@ class VisionService:
             
             holds = []
             for pred in data.get("predictions", []):
-                # Filtrăm predicțiile slabe (păstrăm doar ce e >= 60% sigur)
-                if pred.get("confidence", 0) < 0.45:
+                # Spray walls are dense, lower threshold to capture more holds
+                if pred.get("confidence", 0) < 0.05:
                     continue
 
                 clasa_detectata = pred.get("class", "unknown").lower()
@@ -69,6 +105,12 @@ class VisionService:
 
                 h_type = self._map_label_to_type(clasa_detectata)
                 
+                # Extragem poligonul (dacă modelul este de tip Instance Segmentation)
+                points = pred.get("points", [])
+                polygon_data = None
+                if points:
+                    polygon_data = [{"x": p["x"] / img_w, "y": p["y"] / img_h} for p in points]
+                
                 holds.append(
                     HoldLocation(
                         x=pred["x"] / img_w, 
@@ -78,7 +120,8 @@ class VisionService:
                         radius=max(pred["width"], pred["height"]) / (2 * max(img_w, img_h)), 
                         confidence=round(pred["confidence"], 3),
                         hold_type=h_type,          
-                        color=clasa_detectata      
+                        color=clasa_detectata,
+                        polygon=polygon_data
                     )
                 )
             

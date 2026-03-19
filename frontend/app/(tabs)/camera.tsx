@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { analyzeRoute } from '../../utils/api';
 import { setPendingResult } from '../../utils/store';
 import { auth } from '../../firebaseConfig';
@@ -45,6 +46,7 @@ const SLAB_DEGREES = [5, 10, 15, 20, 25, 30];
 
 export default function CameraScreen() {
   const router = useRouter();
+  const isFocused = useIsFocused();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<'back' | 'front'>('back');
@@ -259,7 +261,9 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container} testID="camera-screen-native">
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} flash={flash} />
+      {isFocused && (
+        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} flash={flash} />
+      )}
 
       {/* Top controls */}
       <SafeAreaView style={styles.topBar}>
@@ -431,6 +435,8 @@ const styles = StyleSheet.create({
   degBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, backgroundColor: C.border },
   degBtnActive: { backgroundColor: C.accent },
   degBtnText: { color: C.secondary, fontSize: 13, fontWeight: '600' },
+  degBtnTextActive: { color: '#09090b' },
+  
 
   // Stiluri Angle Selector Native (Peste cameră)
   angleContainerNative: { position: 'absolute', bottom: 220, left: 0, right: 0, alignItems: 'center' },
