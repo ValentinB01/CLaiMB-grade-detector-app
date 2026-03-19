@@ -11,7 +11,6 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Asta "ascultă" în fundal dacă te-ai logat sau delogat
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);
@@ -21,7 +20,7 @@ export default function RootLayout() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#09090b', justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#ffffff" />
       </View>
     );
@@ -31,13 +30,15 @@ export default function RootLayout() {
     <>
       <StatusBar style="light" />
       {user ? (
-        // Dacă AVEM user, arătăm aplicația (camerele, tab-urile)
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#09090b' } }}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0f172a' } }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="result" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="profile" options={{ headerShown: false, presentation: 'modal' }} />
+          <Stack.Screen name="about" options={{ headerShown: false, presentation: 'modal' }} />
+          <Stack.Screen name="contact" options={{ headerShown: false, presentation: 'modal' }} />
+          <Stack.Screen name="help" options={{ headerShown: false, presentation: 'modal' }} />
         </Stack>
       ) : (
-        // Dacă NU avem user, arătăm direct ecranul de Login pe tot ecranul
         <LoginScreen />
       )}
     </>

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Image } from 'react-native';
 import {
   View,
   Text,
@@ -14,18 +15,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { analyzeRoute } from '../../utils/api';
 import { setPendingResult } from '../../utils/store';
+import { auth } from '../../firebaseConfig';
+import DrawerMenu from '../../components/DrawerMenu';
 
 const C = {
-  bg: '#09090b',
-  card: '#18181b',
-  border: '#27272a',
-  primary: '#fafafa',
-  secondary: '#a1a1aa',
-  muted: '#52525b',
+  bg: '#0f172a',
+  card: '#1e293b',
+  border: '#334155',
+  primary: '#f8fafc',
+  secondary: '#94a3b8',
+  muted: '#64748b',
   accent: '#22d3ee',
 };
 
@@ -47,10 +51,11 @@ export default function CameraScreen() {
   const [flash, setFlash] = useState<'off' | 'on'>('off');
   const [gymName, setGymName] = useState('');
   const [loading, setLoading] = useState(false);
-  
+
   // State-uri pentru unghiul dinamic
   const [wallType, setWallType] = useState<'inclined' | 'vertical' | 'overhang'>('vertical');
   const [wallDegree, setWallDegree] = useState<number>(0);
+  const [drawerVisible, setDrawerVisible] = useState(false);
 
   // Funcție care construiește string-ul final pentru Gemini
   const getWallAngleString = () => {
@@ -114,7 +119,7 @@ export default function CameraScreen() {
       const result = await analyzeRoute({
         image_base64: base64,
         gym_name: gymName.trim() || 'Unknown Gym',
-        wall_angle: finalAngle, // Trimitem textul curat către backend
+        wall_angle: finalAngle,
       });
       setPendingResult({ ...result, image_base64: base64 });
       router.push('/result');
@@ -137,8 +142,14 @@ export default function CameraScreen() {
   if (Platform.OS === 'web') {
     return (
       <SafeAreaView style={styles.container} testID="camera-screen-web">
+        <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <View style={styles.webContainer}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <TouchableOpacity style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border }} onPress={() => setDrawerVisible(true)}>
+                <Ionicons name="menu" size={20} color={C.primary} />
+              </TouchableOpacity>
+            </View>
             <View style={styles.webHero}>
               <View style={styles.webIconRing}>
                 <Ionicons name="camera" size={56} color={C.accent} />
@@ -163,17 +174,17 @@ export default function CameraScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-              
+
               {/* Sub-meniu grade Web */}
               {wallType !== 'vertical' && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.degreeScrollWeb} contentContainerStyle={{ gap: 8 }}>
                   {(wallType === 'overhang' ? OVERHANG_DEGREES : SLAB_DEGREES).map(deg => (
-                    <TouchableOpacity 
-                      key={deg} 
+                    <TouchableOpacity
+                      key={deg}
                       style={[styles.degBtn, wallDegree === deg && styles.degBtnActive]}
                       onPress={() => setWallDegree(deg)}
                     >
-                      <Text style={[styles.degBtnText, wallDegree === deg && styles.degBtnTextActive]}>{deg}°</Text>
+                      <Text style={[styles.degBtnTextNative, wallDegree === deg && styles.degBtnTextActiveNative]}>{deg}°</Text>
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -198,14 +209,21 @@ export default function CameraScreen() {
               onPress={pickFromGallery}
               disabled={loading}
             >
-              {loading ? (
-                <ActivityIndicator color="#09090b" />
-              ) : (
-                <>
-                  <Ionicons name="images" size={20} color="#09090b" />
-                  <Text style={styles.ctaBtnText}>CHOOSE PHOTO</Text>
-                </>
-              )}
+              <LinearGradient
+                colors={['#22d3ee', '#6366f1']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.ctaGradient}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="images" size={20} color="#fff" />
+                    <Text style={styles.ctaBtnText}>CHOOSE PHOTO</Text>
+                  </>
+                )}
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -225,7 +243,14 @@ export default function CameraScreen() {
           <Ionicons name="camera-outline" size={72} color={C.accent} />
           <Text style={styles.permTitle}>Camera Access Needed</Text>
           <TouchableOpacity style={styles.ctaBtn} onPress={requestPermission}>
-            <Text style={styles.ctaBtnText}>GRANT ACCESS</Text>
+            <LinearGradient
+              colors={['#22d3ee', '#6366f1']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.ctaGradient}
+            >
+              <Text style={styles.ctaBtnText}>GRANT ACCESS</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -238,10 +263,20 @@ export default function CameraScreen() {
 
       {/* Top controls */}
       <SafeAreaView style={styles.topBar}>
+        <TouchableOpacity style={styles.avatarBtn} onPress={() => router.push('/profile')}>
+          {auth.currentUser?.photoURL ? (
+            <Image source={{ uri: auth.currentUser.photoURL }} style={styles.smallAvatarImage} />
+          ) : (
+            <Ionicons name="person" size={20} color="#fff" />
+          )}
+        </TouchableOpacity>
+
+        <View style={{ flex: 1 }} />
+
         <TouchableOpacity style={styles.iconBtn} onPress={() => setFlash(f => (f === 'off' ? 'on' : 'off'))}>
           <Ionicons name={flash === 'on' ? 'flash' : 'flash-off'} size={22} color="#fff" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setFacing(f => (f === 'back' ? 'front' : 'back'))}>
+        <TouchableOpacity style={[styles.iconBtn, { marginLeft: 12 }]} onPress={() => setFacing(f => (f === 'back' ? 'front' : 'back'))}>
           <Ionicons name="camera-reverse" size={22} color="#fff" />
         </TouchableOpacity>
       </SafeAreaView>
@@ -278,14 +313,14 @@ export default function CameraScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        
+
         {/* Sub-meniul orizontal cu grade (doar pe Native) */}
         {wallType !== 'vertical' && (
           <View style={styles.degreeWrapperNative}>
-             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20 }}>
               {(wallType === 'overhang' ? OVERHANG_DEGREES : SLAB_DEGREES).map(deg => (
-                <TouchableOpacity 
-                  key={deg} 
+                <TouchableOpacity
+                  key={deg}
                   style={[styles.degBtnNative, wallDegree === deg && styles.degBtnActiveNative]}
                   onPress={() => setWallDegree(deg)}
                 >
@@ -304,7 +339,7 @@ export default function CameraScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.shutter, loading && styles.shutterDisabled]} onPress={handleCapture} disabled={loading}>
-          {loading ? <ActivityIndicator color="#09090b" size="large" /> : <View style={styles.shutterInner} />}
+          {loading ? <ActivityIndicator color={C.bg} size="large" /> : <View style={styles.shutterInner} />}
         </TouchableOpacity>
 
         <View style={{ width: 56 }} />
@@ -335,6 +370,22 @@ export default function CameraScreen() {
 }
 
 const styles = StyleSheet.create({
+  avatarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: C.accent,
+    overflow: 'hidden',
+  },
+  smallAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+
   container: { flex: 1, backgroundColor: C.bg },
   webContainer: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 24 },
   webHero: { alignItems: 'center', gap: 12 },
@@ -343,8 +394,9 @@ const styles = StyleSheet.create({
   webSub: { fontSize: 14, color: C.secondary, textAlign: 'center' },
   gymInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: C.border, width: '100%', maxWidth: 400 },
   gymInput: { flex: 1, color: C.primary, fontSize: 15 },
-  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accent, borderRadius: 9999, paddingVertical: 16, paddingHorizontal: 40, width: '100%', maxWidth: 400 },
-  ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#09090b', letterSpacing: 1 },
+  ctaBtn: { borderRadius: 9999, overflow: 'hidden', width: '100%', maxWidth: 400 },
+  ctaGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16, paddingHorizontal: 40 },
+  ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 1 },
   permissionContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
   permTitle: { fontSize: 22, fontWeight: '700', color: C.primary, textAlign: 'center' },
   topBar: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'flex-end', gap: 12, paddingHorizontal: 20, paddingTop: 8, zIndex: 10 },
@@ -364,9 +416,9 @@ const styles = StyleSheet.create({
   shutterInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
   gymBar: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 40, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
   gymInputNative: { flex: 1, color: '#fff', fontSize: 13 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(9,9,11,0.85)', alignItems: 'center', justifyContent: 'center', gap: 16 },
+  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.85)', alignItems: 'center', justifyContent: 'center', gap: 16 },
   loadingText: { color: C.accent, fontSize: 16, fontWeight: '600' },
-  
+
   // Stiluri Angle Selector Web
   angleContainerWeb: { alignItems: 'center', marginBottom: 12, width: '100%', maxWidth: 400 },
   angleTitle: { color: C.secondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
@@ -379,17 +431,17 @@ const styles = StyleSheet.create({
   degBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, backgroundColor: C.border },
   degBtnActive: { backgroundColor: C.accent },
   degBtnText: { color: C.secondary, fontSize: 13, fontWeight: '600' },
-  
+
   // Stiluri Angle Selector Native (Peste cameră)
   angleContainerNative: { position: 'absolute', bottom: 220, left: 0, right: 0, alignItems: 'center' },
   angleBtnNative: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: 'transparent' },
   angleBtnActiveNative: { borderColor: C.accent, backgroundColor: 'rgba(34,211,238,0.2)' },
   angleBtnTextNative: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
-  
+
   // Design-ul pentru butoanele de grade de pe telefon
   degreeWrapperNative: { width: '100%', marginTop: 12, height: 36 },
-  degBtnNative: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: '#52525b' },
+  degBtnNative: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: '#64748b' },
   degBtnActiveNative: { backgroundColor: C.accent, borderColor: C.accent },
-  degBtnTextNative: { color: '#a1a1aa', fontSize: 13, fontWeight: '700' },
-  degBtnTextActiveNative: { color: '#09090b' },
+  degBtnTextNative: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
+  degBtnTextActiveNative: { color: '#0f172a' },
 });
