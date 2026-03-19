@@ -7,23 +7,28 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { fetchStats, fetchHistory } from '../../utils/api';
 import { auth } from '../../firebaseConfig';
 import { signOut } from 'firebase/auth';
+import DrawerMenu from '../../components/DrawerMenu';
+
 
 const C = {
-  bg: '#09090b',
-  card: '#18181b',
-  modal: '#27272a',
-  border: '#27272a',
-  primary: '#fafafa',
-  secondary: '#a1a1aa',
-  muted: '#52525b',
+  bg: '#0f172a',
+  card: '#1e293b',
+  modal: '#334155',
+  border: '#334155',
+  primary: '#f8fafc',
+  secondary: '#94a3b8',
+  muted: '#64748b',
   accent: '#22d3ee',
+  purple: '#a78bfa',
   success: '#4ade80',
   warning: '#fbbf24',
   error: '#ef4444',
@@ -50,6 +55,7 @@ export default function HomeScreen() {
   const [recent, setRecent] = useState<RecentRoute[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [drawerVisible, setDrawerVisible] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -100,28 +106,47 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}
       >
+        <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>ClAImb AI Coach</Text>
-            <Text style={styles.numeUser}>
-              {auth.currentUser?.email || 'Guest Climber'}
-            </Text>
-          </View>
-          
-          {/* Partea dreaptă: Avatar + Buton Logout */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={styles.avatarWrap}>
-              <Text style={styles.avatarText}>
-                {auth.currentUser?.email 
-                  ? auth.currentUser.email.charAt(0).toUpperCase() 
-                  : 'G'}
+            <TouchableOpacity style={styles.hamburgerBtn} onPress={() => setDrawerVisible(true)}>
+              <Ionicons name="menu" size={22} color={C.primary} />
+            </TouchableOpacity>
+            <View>
+              <Text style={styles.greeting}>CLaiMB AI Coach</Text>
+              <Text style={styles.numeUser}>
+                {auth.currentUser?.email || 'Guest Climber'}
               </Text>
             </View>
-            
-            <TouchableOpacity 
+          </View>
+
+          {/* Partea dreaptă: Avatar + Buton Logout */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+
+            {/* Buton Avatar (Apăsabil) */}
+            <TouchableOpacity
+              style={[styles.avatarWrap, { overflow: 'hidden' }]}
+              onPress={() => router.push('/profile')}
+            >
+              {auth.currentUser?.photoURL ? (
+                <Image
+                  source={{ uri: auth.currentUser.photoURL }}
+                  style={{ width: '100%', height: '100%' }}
+                />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {auth.currentUser?.email
+                    ? auth.currentUser.email.charAt(0).toUpperCase()
+                    : 'G'}
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
               onPress={() => signOut(auth)}
-              style={{ padding: 8, backgroundColor: C.card, borderRadius: 8, borderWidth: 1, borderColor: C.border }}
+              style={styles.logoutBtn}
             >
               <Ionicons name="log-out-outline" size={20} color={C.error} />
             </TouchableOpacity>
@@ -147,7 +172,7 @@ export default function HomeScreen() {
             label="AI Model"
             value="4-6"
             icon="flash"
-            color={C.success}
+            color={C.purple}
           />
         </View>
 
@@ -158,9 +183,16 @@ export default function HomeScreen() {
           onPress={() => router.push('/(tabs)/camera')}
           activeOpacity={0.85}
         >
-          <Ionicons name="camera" size={22} color="#09090b" />
-          <Text style={styles.ctaBtnText}>SCAN A ROUTE</Text>
-          <Ionicons name="arrow-forward" size={18} color="#09090b" />
+          <LinearGradient
+            colors={['#22d3ee', '#6366f1']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.ctaGradient}
+          >
+            <Ionicons name="camera" size={22} color="#fff" />
+            <Text style={styles.ctaBtnText}>SCAN A ROUTE</Text>
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
+          </LinearGradient>
         </TouchableOpacity>
 
         {/* AI Badge */}
@@ -210,13 +242,13 @@ export default function HomeScreen() {
         <View style={styles.howCard}>
           <Text style={styles.howTitle}>How it works</Text>
           {[
-            { icon: 'camera', text: 'Photograph the climbing wall' },
-            { icon: 'eye', text: 'AI detects holds & maps positions' },
-            { icon: 'star', text: 'Receive V-scale grade + coach tips' },
+            { icon: 'camera', text: 'Photograph the climbing wall', color: C.accent },
+            { icon: 'eye', text: 'AI detects holds & maps positions', color: C.purple },
+            { icon: 'star', text: 'Receive V-scale grade + coach tips', color: C.success },
           ].map((item, i) => (
             <View key={i} style={styles.howRow}>
-              <View style={styles.howIconWrap}>
-                <Ionicons name={item.icon as any} size={16} color={C.accent} />
+              <View style={[styles.howIconWrap, { backgroundColor: item.color + '20' }]}>
+                <Ionicons name={item.icon as any} size={16} color={item.color} />
               </View>
               <Text style={styles.howText}>{item.text}</Text>
             </View>
@@ -229,7 +261,7 @@ export default function HomeScreen() {
 
 function StatCard({ label, value, icon, color }: { label: string; value: string; icon: any; color: string }) {
   return (
-    <View style={[styles.statCard, { borderColor: color + '33' }]}>
+    <View style={[styles.statCard, { borderLeftColor: color, borderLeftWidth: 3 }]}>
       <Ionicons name={icon} size={18} color={color} />
       <Text style={[styles.statValue, { color }]}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
@@ -241,24 +273,26 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 20, paddingBottom: 40 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  hamburgerBtn: { width: 40, height: 40, borderRadius: 10, backgroundColor: C.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
   greeting: { fontSize: 22, fontWeight: '800', color: C.primary, letterSpacing: -0.5 },
-  numeUser: {fontSize: 14, color: C.secondary, marginTop:4},
-  subGreeting: { fontSize: 14, color: C.secondary, marginTop: 2 },
+  numeUser: { fontSize: 14, color: C.secondary, marginTop: 4 },
   avatarWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent + '22', borderWidth: 2, borderColor: C.accent, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 18, fontWeight: '700', color: C.accent },
+  logoutBtn: { padding: 8, backgroundColor: C.card, borderRadius: 8, borderWidth: 1, borderColor: C.border },
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', gap: 6, borderWidth: 1 },
+  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border },
   statValue: { fontSize: 20, fontWeight: '800' },
   statLabel: { fontSize: 10, color: C.secondary, textAlign: 'center' },
-  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accent, borderRadius: 9999, paddingVertical: 16, marginBottom: 12 },
-  ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#09090b', letterSpacing: 1 },
-  aiBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.card, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'center', marginBottom: 28 },
+  ctaBtn: { marginBottom: 12, borderRadius: 9999, overflow: 'hidden' },
+  ctaGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
+  ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#fff', letterSpacing: 1 },
+  aiBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.purple + '18', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'center', marginBottom: 28, borderWidth: 1, borderColor: C.purple + '30' },
   aiBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.success },
   aiBadgeText: { fontSize: 11, color: C.secondary },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 17, fontWeight: '700', color: C.primary },
   seeAll: { fontSize: 13, color: C.accent },
-  emptyCard: { backgroundColor: C.card, borderRadius: 16, padding: 32, alignItems: 'center', gap: 8, marginBottom: 24 },
+  emptyCard: { backgroundColor: C.card, borderRadius: 16, padding: 32, alignItems: 'center', gap: 8, marginBottom: 24, borderWidth: 1, borderColor: C.border },
   emptyTitle: { fontSize: 16, fontWeight: '600', color: C.secondary },
   emptySubtitle: { fontSize: 13, color: C.muted, textAlign: 'center' },
   routeCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: C.border },
@@ -269,9 +303,9 @@ const styles = StyleSheet.create({
   gymName: { fontSize: 14, fontWeight: '600', color: C.primary },
   routeMeta: { fontSize: 12, color: C.secondary, marginTop: 2 },
   routeDate: { fontSize: 12, color: C.muted },
-  howCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border },
+  howCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.accent + '25' },
   howTitle: { fontSize: 14, fontWeight: '700', color: C.primary, marginBottom: 14 },
   howRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
-  howIconWrap: { width: 30, height: 30, borderRadius: 8, backgroundColor: C.accent + '15', alignItems: 'center', justifyContent: 'center' },
+  howIconWrap: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   howText: { fontSize: 13, color: C.secondary, flex: 1 },
 });
