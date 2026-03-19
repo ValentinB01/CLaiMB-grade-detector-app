@@ -226,3 +226,81 @@ class GradingService:
                 cluster_count += 1
 
         return split_routes if split_routes else [route]
+
+    async def grade_custom_route(
+        self,
+        selected_holds: List[HoldLocation],
+        image_base64: str,
+        wall_angle: str = "Vertical"
+    ) -> tuple:
+        """Grade a user-defined spray wall route (selected subset of holds)."""
+        if not self.client or not selected_holds:
+            return "V?", 0.0, "AI Grading unavailable or no holds selected."
+
+        try:
+            # 1. Annotate image with only the selected holds
+            annotated_image = self._draw_holds_on_image(image_base64, selected_holds)
+
+            # 2. Build holds summary
+            holds_summary = ""
+            for idx, h in enumerate(selected_holds):
+                holds_summary += f"[{idx}] Type: {h.hold_type}, X:{h.x:.2f}, Y:{h.y:.2f}\n"
+
+            angle_instruction = f"""
+            CRITICAL CONTEXT: The wall angle is: {wall_angle}. 
+            Adjust your estimated V-grade and coaching advice accordingly.
+            A hold that is a jug on a vertical wall becomes much harder on a 45-degree overhang.
+            """
+
+            prompt = f"""
+            You are an expert bouldering coach analyzing a SPRAY WALL route.
+
+            {angle_instruction}
+
+            The climber has manually selected {len(selected_holds)} holds to create their own route.
+            The holds are marked with white ID numbers on the attached image.
+            
+            Here is the data for the selected holds:
+            {holds_summary}
+
+            Analyze this as a SINGLE route. Consider:
+            1. The spacing and distance between consecutive holds
+            2. The wall angle: {wall_angle}
+            3. Whether the movement requires dynamic moves, heel hooks, or complex body positioning
+            4. The overall flow and difficulty of the sequence
+
+            V-SCALE RUBRIC:
+            * V0-V1: Large jugs, ladder-like, forgiving
+            * V2-V3: Mix of jugs/medium holds, basic body positioning
+            * V4-V5: Poor holds, dynamic movement, body tension
+            * V6-V8: Sparse holds, terrible quality, extreme demand
+            * V9+: Almost invisible holds, huge dynamic leaps
+
+            Return STRICTLY as a raw JSON object (no markdown, no ```json tags):
+            {{
+              "estimated_grade": "V-scale grade (e.g. V4)",
+              "confidence": 0.85,
+              "coaching_notes": "Detailed coaching advice for this specific route, including suggested beta (sequence of movements), tips on body positioning, and what makes this route challenging."
+            }}
+            """
+
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=[annotated_image, prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2
+                )
+            )
+
+            result_data = json.loads(response.text)
+            grade = result_data.get("estimated_grade", "V?")
+            confidence = result_data.get("confidence", 0.7)
+            coaching = result_data.get("coaching_notes", "Route analyzed successfully.")
+
+            logger.info(f"✅ Spray Wall grading: {grade} (confidence: {confidence})")
+            return grade, confidence, coaching
+
+        except Exception as e:
+            logger.error(f"❌ Error in grade_custom_route: {e}")
+            return "V?", 0.0, f"Grading failed: {str(e)}"

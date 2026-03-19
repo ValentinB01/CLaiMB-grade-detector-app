@@ -1,10 +1,15 @@
 import os
+from pathlib import Path
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
-load_dotenv()
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 MONGODB_URL = os.getenv("MONGODB_URL")
+if not MONGODB_URL:
+    raise ValueError("❌ MONGODB_URL is missing! Please check backend/.env file.")
+
 DB_NAME = os.getenv("DB_NAME", "claimb_db")
 
 class Database:
