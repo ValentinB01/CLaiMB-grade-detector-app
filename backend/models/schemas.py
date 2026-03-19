@@ -1,7 +1,14 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime
+from enum import Enum
 import uuid
+
+
+class RouteStatus(str, Enum):
+    PROJECT = "Project"
+    SENT = "Sent"
+    TOPPED = "Topped"
+
 
 class DetectedRoute(BaseModel):
     color: str
@@ -9,12 +16,13 @@ class DetectedRoute(BaseModel):
     estimated_grade: str
     reasoning: str
 
+
 class HoldLocation(BaseModel):
     """Represents a detected climbing hold on the wall."""
     x: float = Field(..., ge=0.0, le=1.0, description="Center X position, normalized 0-1")
     y: float = Field(..., ge=0.0, le=1.0, description="Center Y position, normalized 0-1")
-    width: float = 0.0   # <--- Adăugat
-    height: float = 0.0  # <--- Adăugat
+    width: float = 0.0
+    height: float = 0.0
     radius: float = Field(..., ge=0.001, le=0.2, description="Hold radius, normalized 0-1")
     confidence: float = Field(..., ge=0.0, le=1.0)
     hold_type: str = Field(default="hand", description="start | finish | hand | foot")
@@ -38,7 +46,8 @@ class AnalysisResponse(BaseModel):
     notes: str
     gym_name: str
     processed_at: str
-    detected_routes: List[DetectedRoute] = []
+    detected_routes: List[DetectedRoute] = Field(default_factory=list)
+
 
 class RouteRecord(BaseModel):
     id: Optional[str] = None
@@ -51,7 +60,9 @@ class RouteRecord(BaseModel):
     thumbnail_base64: Optional[str] = None
     analyzed_at: str
     user_id: str = "guest"
-    detected_routes: List[DetectedRoute] = []
+    status: RouteStatus = RouteStatus.PROJECT
+    detected_routes: List[DetectedRoute] = Field(default_factory=list)
+
 
 class RouteHistoryResponse(BaseModel):
     routes: List[RouteRecord]

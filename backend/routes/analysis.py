@@ -50,6 +50,7 @@ async def analyze_route(request: AnalysisRequest):
             holds_count=len(holds),
             confidence=confidence,
             notes=notes,
+            status=RouteStatus.PROJECT,
             thumbnail_base64=thumbnail,
             analyzed_at=processed_at,
             user_id=request.user_id if request.user_id else "guest",
