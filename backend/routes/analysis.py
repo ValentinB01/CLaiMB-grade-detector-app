@@ -3,7 +3,11 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
-from models.schemas import AnalysisRequest, AnalysisResponse, RouteRecord
+from models.schemas import (
+    AnalysisRequest, AnalysisResponse, RouteRecord, RouteStatus,
+    DetectRequest, DetectResponse,
+    GradeSelectionRequest, GradeSelectionResponse,
+)
 from services.vision_service import VisionService
 from services.grading_service import GradingService
 from database import db
@@ -50,6 +54,7 @@ async def analyze_route(request: AnalysisRequest):
             holds_count=len(holds),
             confidence=confidence,
             notes=notes,
+            status=RouteStatus.PROJECT,
             thumbnail_base64=thumbnail,
             analyzed_at=processed_at,
             user_id=request.user_id if request.user_id else "guest",
@@ -87,4 +92,88 @@ async def get_analysis(analysis_id: str):
         gym_name=doc.get("gym_name", "Unknown Gym"),
         processed_at=doc.get("analyzed_at", ""),
         detected_routes=doc.get("detected_routes", []) # Încărcăm traseele și din istoric
+    )
+
+
+# ---------------------------------------------------------------------------
+# Spray Wall Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/detect", response_model=DetectResponse)
+async def detect_holds(request: DetectRequest):
+    """Step 1: Detect all holds on wall using Roboflow only (no grading)."""
+    logger.info("🔍 Spray Wall: Starting hold detection (Roboflow only)")
+
+    try:
+        holds = await _vision.analyze_image(request.image_base64)
+    except Exception as exc:
+        logger.error(f"VisionService error: {exc}")
+        raise HTTPException(status_code=500, detail=f"Hold detection failed: {str(exc)}")
+
+    logger.info(f"✅ Spray Wall: Detected {len(holds)} holds")
+    return DetectResponse(
+        holds=holds,
+        holds_count=len(holds)
+    )
+
+
+@router.post("/grade-selection", response_model=GradeSelectionResponse)
+async def grade_selection(request: GradeSelectionRequest):
+    """Step 2: Grade user-selected holds from spray wall."""
+    logger.info(f"🎯 Spray Wall: Grading {len(request.selected_hold_indices)} selected holds")
+
+    # Validate indices
+    for idx in request.selected_hold_indices:
+        if idx < 0 or idx >= len(request.holds):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Hold index {idx} out of range (0-{len(request.holds)-1})"
+            )
+
+    # Extract only selected holds
+    selected_holds = [request.holds[i] for i in request.selected_hold_indices]
+
+    # Grade with Gemini
+    try:
+        grade, confidence, coaching = await _grading.grade_custom_route(
+            selected_holds=selected_holds,
+            image_base64=request.image_base64,
+            wall_angle=request.wall_angle
+        )
+    except Exception as exc:
+        logger.error(f"GradingService error: {exc}")
+        grade, confidence, coaching = "V?", 0.0, "Grading unavailable."
+
+    processed_at = datetime.now(timezone.utc).isoformat()
+    analysis_id = str(uuid.uuid4())
+
+    # Save to history
+    try:
+        thumbnail = (request.image_base64[:50000] if request.image_base64 else None)
+        record = RouteRecord(
+            analysis_id=analysis_id,
+            gym_name=request.gym_name or "Unknown Gym",
+            grade=grade,
+            holds_count=len(selected_holds),
+            confidence=confidence,
+            notes=f"[Spray Wall] {coaching}",
+            status=RouteStatus.PROJECT,
+            thumbnail_base64=thumbnail,
+            analyzed_at=processed_at,
+            user_id=request.user_id if request.user_id else "guest",
+        )
+        await db.db.route_history.insert_one(record.model_dump())
+        logger.info(f"Saved spray wall route {analysis_id}")
+    except Exception as exc:
+        logger.warning(f"Failed to save spray wall history (non-fatal): {exc}")
+
+    return GradeSelectionResponse(
+        analysis_id=analysis_id,
+        grade=grade,
+        confidence=confidence,
+        coaching_notes=coaching,
+        selected_holds_count=len(selected_holds),
+        gym_name=request.gym_name or "Unknown Gym",
+        wall_angle=request.wall_angle or "vertical",
+        processed_at=processed_at
     )

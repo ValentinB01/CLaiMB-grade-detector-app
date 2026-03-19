@@ -56,6 +56,15 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="spraywall"
+        options={{
+          title: 'Spray',
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="grid-outline" color={color} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="history"
         options={{
           title: 'History',

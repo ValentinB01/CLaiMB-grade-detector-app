@@ -81,11 +81,7 @@ android-sdk/
 # Environment files
 *.env
 *.env.*
-.env
-.env.local
-.env.development
-.env.production
 
-# Expo/Metro cache
-.expo/
+# Metro Bundler
 .metro-cache/
+**/.metro-cache/

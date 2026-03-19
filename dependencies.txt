@@ -1,0 +1,39 @@
+# CLaiMB AI Coach - Project Dependencies
+
+This project is split into two parts: a React Native (Expo) frontend and a Python (FastAPI) backend.
+To get started, you must install the dependencies for both environments.
+
+---
+
+## 1. Frontend (React Native / Expo)
+The frontend relies on Node.js and npm (or yarn/bun).
+
+Requirements:
+- Node.js (v18+)
+
+To install frontend dependencies, open your terminal and run:
+`cd frontend`
+`npm install`
+
+---
+
+## 2. Backend (Python / FastAPI)
+The backend uses Python 3.9+ and relies on several AI and image processing libraries.
+
+Requirements:
+- Python (v3.9+)
+
+To install backend dependencies, open your terminal and run:
+`cd backend`
+`pip install -r requirements.txt`
+
+The `requirements.txt` file inside the `backend` folder contains exactly:
+- fastapi
+- uvicorn
+- motor
+- python-dotenv
+- httpx
+- pillow
+- google-genai
+- numpy
+- scikit-learn
