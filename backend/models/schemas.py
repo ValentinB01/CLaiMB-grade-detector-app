@@ -48,6 +48,7 @@ class AnalysisResponse(BaseModel):
     gym_name: str
     processed_at: str
     detected_routes: List[DetectedRoute] = Field(default_factory=list)
+    image_base64: Optional[str] = None
 
 
 class RouteRecord(BaseModel):
@@ -63,6 +64,8 @@ class RouteRecord(BaseModel):
     user_id: str = "guest"
     status: RouteStatus = RouteStatus.PROJECT
     detected_routes: List[DetectedRoute] = Field(default_factory=list)
+    image_base64: Optional[str] = None
+    holds: Optional[List[HoldLocation]] = None
 
 
 class RouteHistoryResponse(BaseModel):
@@ -105,4 +108,25 @@ class GradeSelectionResponse(BaseModel):
     selected_holds_count: int
     gym_name: str
     wall_angle: str
+    processed_at: str
+
+
+# ---------------------------------------------------------------------------
+# Ask the Coach Feature Schemas
+# ---------------------------------------------------------------------------
+class ChatMessage(BaseModel):
+    role: str = Field(..., description="'user' or 'coach'")
+    text: str
+
+class ChatRequest(BaseModel):
+    image_base64: str
+    holds: List[HoldLocation]
+    prompt: str
+    history: List[ChatMessage] = Field(default_factory=list)
+    wall_angle: Optional[str] = "vertical"
+    gym_name: Optional[str] = "Unknown Gym"
+    user_id: Optional[str] = "guest"
+
+class ChatResponse(BaseModel):
+    reply: str
     processed_at: str

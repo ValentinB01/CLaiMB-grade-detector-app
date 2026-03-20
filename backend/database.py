@@ -21,6 +21,8 @@ db = Database()
 async def connect_to_mongo():
     db.client = AsyncIOMotorClient(MONGODB_URL)
     db.db = db.client[DB_NAME]
+    # Creăm index pentru a evita erorile de memorie la sortare (QueryExceededMemoryLimitNoDiskUseAllowed)
+    await db.db.route_history.create_index([("user_id", 1), ("analyzed_at", -1)])
     print("✅ Conectat la MongoDB Atlas!")
 
 async def close_mongo_connection():
@@ -29,12 +31,12 @@ async def close_mongo_connection():
 
 # Funcție utilă pentru a salva un traseu
 async def save_route(route_data: dict):
-    result = await db.db.routes.insert_one(route_data)
+    result = await db.db.route_history.insert_one(route_data)
     return str(result.inserted_id)
 
 # Funcție pentru a lua istoricul
 async def get_all_routes():
-    cursor = db.db.routes.find().sort("created_at", -1)
+    cursor = db.db.route_history.find().sort("analyzed_at", -1)
     routes = await cursor.to_list(length=100)
     for r in routes:
         r["_id"] = str(r["_id"]) # Convertim ID-ul MongoDB în string pentru JSON
