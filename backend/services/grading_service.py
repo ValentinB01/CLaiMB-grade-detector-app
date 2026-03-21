@@ -16,6 +16,37 @@ from models.schemas import HoldLocation
 
 logger = logging.getLogger(__name__)
 
+
+def _compute_spatial_context(holds: List) -> str:
+    """Pre-compute spatial statistics about hold positions for the AI."""
+    if len(holds) < 2:
+        return "Spatial context: Only 0-1 holds detected, insufficient for analysis."
+
+    xs = [h.x for h in holds]
+    ys = [h.y for h in holds]
+
+    # Average pairwise distance between all holds
+    total_dist = 0
+    count = 0
+    for i in range(len(holds)):
+        for j in range(i + 1, len(holds)):
+            dist = ((holds[i].x - holds[j].x) ** 2 + (holds[i].y - holds[j].y) ** 2) ** 0.5
+            total_dist += dist
+            count += 1
+    avg_dist = total_dist / count if count else 0
+
+    vertical_spread = max(ys) - min(ys)
+    horizontal_spread = max(xs) - min(xs)
+
+    return (
+        f"Spatial Context (all values normalized 0-1):\n"
+        f"  - Total holds: {len(holds)}\n"
+        f"  - Average pairwise distance: {avg_dist:.3f}\n"
+        f"  - Vertical spread (bottom to top): {vertical_spread:.3f}\n"
+        f"  - Horizontal spread (left to right): {horizontal_spread:.3f}\n"
+        f"  - Hold density: {'Dense (spray wall)' if avg_dist < 0.15 else 'Moderate' if avg_dist < 0.25 else 'Sparse'}\n"
+    )
+
 class GradingService:
     def __init__(self):
         self.api_key = os.environ.get("GEMINI_API_KEY")
@@ -34,65 +65,133 @@ class GradingService:
             # 1. Desenează numere pe poză peste prizele găsite de Roboflow
             annotated_image = self._draw_holds_on_image(image_base64, holds)
 
-            # 2. Pregătim un rezumat text al prizelor pentru a ajuta AI-ul
+            # 2. Pregătim un rezumat text al prizelor cu dimensiuni
             holds_summary = ""
             for idx, h in enumerate(holds):
                 color_str = h.color if h.color else "unknown"
-                holds_summary += f"[{idx}] Color: {color_str}, Type: {h.hold_type}, X:{h.x:.2f}, Y:{h.y:.2f}\n"
+                holds_summary += (
+                    f"[{idx}] Color: {color_str}, Type: {h.hold_type}, "
+                    f"Pos: ({h.x:.2f}, {h.y:.2f}), "
+                    f"Size: {h.width:.3f}x{h.height:.3f}\n"
+                )
 
-            angle_instruction = f"""
-            CRITICAL CONTEXT: The user specified that the wall angle is: {wall_angle}. 
-            Pay extreme attention to this! A hold that looks like a jug might be terrible on a 45-degree overhang. 
-            Adjust your estimated V-grade and your coaching advice accordingly.
-            """
-            
+            # 3. Compute spatial context
+            spatial_ctx = _compute_spatial_context(holds)
+
             prompt = f"""
-            You are an expert bouldering coach and master route setter. {angle_instruction}
-            
-            Your task is to analyze the attached image of a climbing wall.
-            CRITICAL VISUAL INSTRUCTION: The detected holds have white ID numbers hovering right next to them. There are NO boxes or dots. Look EXACTLY next to the number to see the raw pixels of the hold to determine its color. Ignore white chalk powder.
+            ROLE: You are an expert bouldering coach and professional route setter with 10+ years of 
+            experience grading routes in commercial climbing gyms. You have set thousands of routes 
+            from V0 to V12 and can accurately estimate difficulty from visual analysis.
 
-            Here is the raw data of the detected holds (X and Y coordinates are normalized 0-1):
+            TASK: Analyze the attached image of a climbing wall.
+
+            CRITICAL VISUAL INSTRUCTION: The detected holds have white ID numbers hovering right 
+            next to them. There are NO boxes or dots. Look EXACTLY next to the number to see the 
+            raw pixels of the hold to determine its color. Ignore white chalk powder.
+
+            ═══════════════════════════════════════════
+            HOLD DATA (all coordinates normalized 0-1, where size < 0.02 = small/crimp, > 0.05 = large/jug):
             {holds_summary}
+            {spatial_ctx}
+            ═══════════════════════════════════════════
 
-            To ensure 100% accuracy, you MUST follow this exact reasoning process:
-            
-            STEP 1: COLOR IDENTIFICATION (MANDATORY)
-            - Look at the physical hold for EACH ID number.
-            - Determine its true plastic color (e.g., Red, Blue, Yellow, Green, Black, Pink, Purple).
-            
-            STEP 2: ROUTE GROUPING
-            - Group the hold IDs into distinct routes based EXCLUSIVELY on the color you identified in Step 1.
-            - NEVER mix holds of different colors in the same route. If hold 1 is Yellow and hold 2 is Green, they are DIFFERENT routes.
+            WALL ANGLE: {wall_angle}
+            Apply this grade adjustment based on wall angle:
+              • Slab (negative angle):    −1 grade for positive holds, +1 for slopers/friction-dependent holds
+              • Vertical (0°):            Baseline — no adjustment
+              • Slight overhang (15−30°): +1 grade
+              • Overhang (30−45°):        +2 grades
+              • Steep overhang (45°+):    +3 grades
+              • Roof (horizontal):        +3 to +4 grades
 
-            STEP 3: GRADING ESTIMATION (V-SCALE RUBRIC)
-            For each color route, you must critically estimate its difficulty (V0 to V17) by evaluating the visual evidence against this strict rubric:
+            ═══════════════════════════════════════════
+            MANDATORY CHAIN-OF-THOUGHT — Follow these steps IN ORDER:
+            ═══════════════════════════════════════════
 
-            * **V0 - V1 (Introductory):** High density of holds. Very large, positive jugs. Abundant, large footholds. Ladder-like spacing. Very forgiving on any wall angle.
-            * **V2 - V3 (Beginner-Intermediate):** Moderate spacing. A mix of jugs and medium holds (mini-jugs, good crimps). Requires basic body positioning. On overhangs, these require good core tension.
-            * **V4 - V5 (Intermediate):** Noticeable visual gaps. Poor holds introduced (flat slopers, small crimps, wide pinches). Might require dynamic movement, heel hooks, or strong body tension. Footholds are smaller or require smearing.
-            * **V6 - V8 (Advanced):** Sparse holds. Terrible hold quality (micro-crimps, bad dual-texture slopers). Extreme physical demand, complex sequences (dynos, toe-catches). 
-            * **V9+ (Elite):** Almost invisible holds, huge dynamic leaps, extreme overhangs with nonexistent feet.
+            STEP 1 — COLOR IDENTIFICATION:
+            For EACH hold ID, look at the actual physical hold pixels next to the number.
+            Determine its true plastic color (e.g., Red, Blue, Yellow, Green, Black, Pink, Purple, White, Orange).
 
-            STEP 4: APPLYING THE WALL ANGLE MULTIPLIER
-            - Remember the wall angle: {wall_angle}. 
-            - A route with "V2" holds on a Vertical wall becomes a "V4" or "V5" if placed on a 45-degree Overhang. Adjust your final grade heavily based on the angle!
+            STEP 2 — ROUTE GROUPING:
+            Group hold IDs into distinct routes based EXCLUSIVELY on the color from Step 1.
+            NEVER mix holds of different colors in the same route.
 
-            Return the analysis STRICTLY as a raw JSON object with the following structure (no markdown formatting, no ```json tags):
+            STEP 3 — DIFFICULTY ESTIMATION (V-SCALE RUBRIC):
+            For each color route, evaluate against this calibrated rubric:
+
+              V0−V1 (Introductory): Equivalent to climbing a ladder. All holds are large, positive 
+                jugs you could hang on for 30+ seconds. Spacing ≤ arm's length. Abundant, large 
+                footholds. Hold size typically > 0.05. Very forgiving on any angle.
+
+              V2−V3 (Beginner-Intermediate): A mix of jugs and medium holds (mini-jugs, good crimps). 
+                Requires basic body positioning (flagging, drop knees). Some spacing gaps. On overhangs, 
+                requires noticeable core tension. Hold sizes mostly 0.03−0.05.
+
+              V4−V5 (Intermediate): Noticeable visual gaps between holds. Poor holds introduced 
+                (flat slopers, small crimps size < 0.025, wide pinches). May require dynamic 
+                movement, heel hooks, or strong body tension. Footholds are smaller or require smearing.
+
+              V6−V8 (Advanced): Sparse holds with large gaps. Terrible hold quality (micro-crimps 
+                size < 0.015, bad slopers). Extreme physical demand, complex sequences 
+                (dynos, toe-catches, figure-fours). Often requires competition-level strength.
+
+              V9+ (Elite): Near-invisible holds, huge dynamic leaps between holds, extreme 
+                overhangs with nonexistent feet. Reserved for elite-level problems.
+
+            STEP 4 — APPLY WALL ANGLE ADJUSTMENT:
+            Take the base grade from Step 3 and adjust using the wall angle rules above.
+
+            STEP 5 — FINAL VALIDATION:
+            Before outputting, ask yourself:
+            - "Would a V0 climber actually be able to pull on these holds at this angle?"
+            - "Is this grade consistent with what I'd see in a real gym?"
+
+            ═══════════════════════════════════════════
+            IMPORTANT RULES (DO NOT VIOLATE):
+            ═══════════════════════════════════════════
+            • Do NOT grade a route higher just because it has fewer holds. A 3-hold route of massive jugs is still V0.
+            • Do NOT assume all small holds are hard. Context matters — a small hold near a rest jug is different from one mid-crux.
+            • Do NOT mix colors. If hold 1 is Yellow and hold 2 is Green, they are DIFFERENT routes, period.
+            • DO consider the overall flow: is the route sustained, or does it have a single hard crux move?
+
+            ═══════════════════════════════════════════
+            EXAMPLE OUTPUT (for reference only):
+            ═══════════════════════════════════════════
+            {{
+              "routes": [
+                {{
+                  "color": "Red",
+                  "holds_ids": [2, 5, 8, 12, 15, 19],
+                  "estimated_grade": "V3",
+                  "reasoning": "6 red holds spanning ~0.7 vertical distance. Mix of medium jugs (size ~0.04) and one small crimp at hold 12 (size 0.018) creating a clear crux. Adequate footholds. Vertical wall = no angle adjustment. Sustained but not powerful."
+                }}
+              ],
+              "overall_notes": "Wall has 3 distinct color routes. The red route is beginner-friendly with one tricky move. The blue route requires more power.",
+              "overall_confidence": 0.85
+            }}
+
+            ═══════════════════════════════════════════
+            CONFIDENCE CALIBRATION:
+            ═══════════════════════════════════════════
+            Use this scale for 'overall_confidence':
+              0.9 − 1.0: Crystal clear holds, obvious single-color route, unambiguous grade
+              0.7 − 0.9: Minor ambiguity in hold colors or borderline grade (±1)
+              0.5 − 0.7: Multiple possible color interpretations or grade uncertainty (±2)
+              Below 0.5: Very uncertain — poor image quality, ambiguous hold colors, or unclear routes
+
+            Return STRICTLY as a raw JSON object (no markdown, no ```json tags):
             {{
               "routes": [
                 {{
                   "color": "Color name (e.g., Red, Blue)",
-                  "holds_ids": [array of integer indexes corresponding to the input holds],
+                  "holds_ids": [array of integer indexes from the input holds],
                   "estimated_grade": "V-scale grade (e.g., V3)",
-                  "reasoning": "A short explanation of why this grade was chosen."
+                  "reasoning": "Explain: which holds form the crux, what makes it this grade, how angle affected it."
                 }}
               ],
-              "overall_notes": "General advice about the wall.",
+              "overall_notes": "General coaching advice about the wall and the routes.",
               "overall_confidence": 0.85
             }}
-
-            IMPORTANT: For 'overall_confidence', provide a float number between 0.0 and 1.0 reflecting how confident you are in your color grouping.
             """
 
             # 4. Trimitem la Gemini 2.5 Flash
@@ -241,46 +340,95 @@ class GradingService:
             # 1. Annotate image with only the selected holds
             annotated_image = self._draw_holds_on_image(image_base64, selected_holds)
 
-            # 2. Build holds summary
+            # 2. Build holds summary with size data
             holds_summary = ""
             for idx, h in enumerate(selected_holds):
-                holds_summary += f"[{idx}] Type: {h.hold_type}, X:{h.x:.2f}, Y:{h.y:.2f}\n"
+                holds_summary += (
+                    f"[{idx}] Type: {h.hold_type}, "
+                    f"Pos: ({h.x:.2f}, {h.y:.2f}), "
+                    f"Size: {h.width:.3f}x{h.height:.3f}\n"
+                )
 
-            angle_instruction = f"""
-            CRITICAL CONTEXT: The wall angle is: {wall_angle}. 
-            Adjust your estimated V-grade and coaching advice accordingly.
-            A hold that is a jug on a vertical wall becomes much harder on a 45-degree overhang.
-            """
+            # 3. Spatial context for selected holds
+            spatial_ctx = _compute_spatial_context(selected_holds)
 
             prompt = f"""
-            You are an expert bouldering coach analyzing a SPRAY WALL route.
+            ROLE: You are a professional bouldering coach with 10+ years of route-setting experience, 
+            analyzing a SPRAY WALL route. You specialize in reading sequences and providing 
+            actionable beta (movement advice) to climbers of all levels.
 
-            {angle_instruction}
-
-            The climber has manually selected {len(selected_holds)} holds to create their own route.
+            CONTEXT: The climber has manually selected {len(selected_holds)} holds to create their own route.
             The holds are marked with white ID numbers on the attached image.
-            
-            Here is the data for the selected holds:
+
+            ═══════════════════════════════════════════
+            SELECTED HOLD DATA (normalized 0-1, size < 0.02 = small, > 0.05 = large):
             {holds_summary}
+            {spatial_ctx}
+            ═══════════════════════════════════════════
 
-            Analyze this as a SINGLE route. Consider:
-            1. The spacing and distance between consecutive holds
-            2. The wall angle: {wall_angle}
-            3. Whether the movement requires dynamic moves, heel hooks, or complex body positioning
-            4. The overall flow and difficulty of the sequence
+            WALL ANGLE: {wall_angle}
+            Grade adjustment:
+              • Slab (negative): −1 for positive holds, +1 for slopers
+              • Vertical (0°): Baseline
+              • Slight overhang (15−30°): +1 grade
+              • Overhang (30−45°): +2 grades  
+              • Steep overhang (45°+): +3 grades
 
-            V-SCALE RUBRIC:
-            * V0-V1: Large jugs, ladder-like, forgiving
-            * V2-V3: Mix of jugs/medium holds, basic body positioning
-            * V4-V5: Poor holds, dynamic movement, body tension
-            * V6-V8: Sparse holds, terrible quality, extreme demand
-            * V9+: Almost invisible holds, huge dynamic leaps
+            ═══════════════════════════════════════════
+            CHAIN-OF-THOUGHT ANALYSIS:
+            ═══════════════════════════════════════════
+
+            STEP 1 — SEQUENCE READING:
+            Look at the hold positions from bottom to top. Determine the logical climbing sequence.
+            Identify the start holds (lowest) and finish hold (highest).
+
+            STEP 2 — MOVEMENT ANALYSIS:
+            For each move in the sequence, determine:
+              - Is it static (controlled reach) or dynamic (deadpoint/dyno)?
+              - What body position is needed (square, flagging, drop knee, bat hang)?
+              - What foot technique (smearing, heel hook, toe hook, bicycle)?
+
+            STEP 3 — DIFFICULTY ESTIMATION:
+            Apply this calibrated rubric:
+              V0−V1: Ladder-like. All holds are large jugs (size > 0.05) you could hang 30+ seconds. 
+                Spacing ≤ arm's length. No technique required.
+              V2−V3: Mix of jugs and medium holds. Some require basic body positioning. 
+                Moderate spacing.
+              V4−V5: Poor holds appear (crimps < 0.025, slopers). Requires dynamic movement, 
+                heel hooks, or strong body tension. Noticeable gaps.
+              V6−V8: Micro-crimps (< 0.015), bad slopers. Complex sequences, extreme demand.
+              V9+: Near-invisible holds, huge dynamic leaps, elite-level.
+
+            STEP 4 — APPLY WALL ANGLE ADJUSTMENT.
+
+            IMPORTANT RULES:
+            • Do NOT grade higher just because there are fewer holds. 3 big jugs = still V0.
+            • DO consider sustained difficulty vs. single crux move.
+            • DO factor in the wall angle heavily — it changes everything.
+
+            ═══════════════════════════════════════════
+            CONFIDENCE CALIBRATION:
+              0.9−1.0: Obvious grade, clear holds, unambiguous sequence
+              0.7−0.9: Borderline grade (±1), minor ambiguity
+              0.5−0.7: Significant uncertainty (±2 grades)
+              Below 0.5: Very uncertain
+            ═══════════════════════════════════════════
 
             Return STRICTLY as a raw JSON object (no markdown, no ```json tags):
             {{
               "estimated_grade": "V-scale grade (e.g. V4)",
               "confidence": 0.85,
-              "coaching_notes": "Detailed coaching advice for this specific route, including suggested beta (sequence of movements), tips on body positioning, and what makes this route challenging."
+              "coaching_notes": "Structure your advice as follows:\n\n"
+                "BETA (Sequence):\n"
+                "1. Start on holds X/Y with [hand position]\n"
+                "2. Move [left/right] hand to hold Z — [static reach / deadpoint / dyno]\n"
+                "3. [Continue move-by-move]\n"
+                "...\n"
+                "N. Top out on hold X\n\n"
+                "KEY TIPS:\n"
+                "• [Body positioning advice]\n"
+                "• [Foot technique tips]\n\n"
+                "CRUX: [Which move is hardest and why]"
             }}
             """
 
