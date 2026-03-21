@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Image } from 'react-native';
 import {
   View,
@@ -17,7 +17,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useIsFocused } from '@react-navigation/native';
 import { analyzeRoute } from '../../utils/api';
 import { setPendingResult } from '../../utils/store';
@@ -46,6 +46,7 @@ const SLAB_DEGREES = [5, 10, 15, 20, 25, 30];
 
 export default function CameraScreen() {
   const router = useRouter();
+  const { selected_gym } = useLocalSearchParams<{ selected_gym?: string }>();
   const isFocused = useIsFocused();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
@@ -58,6 +59,13 @@ export default function CameraScreen() {
   const [wallType, setWallType] = useState<'inclined' | 'vertical' | 'overhang'>('vertical');
   const [wallDegree, setWallDegree] = useState<number>(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
+
+  useEffect(() => {
+    console.log("📍 Params check (selected_gym):", selected_gym);
+    if (selected_gym) {
+      setGymName(selected_gym);
+    }
+  }, [selected_gym]);
 
   // Funcție care construiește string-ul final pentru Gemini
   const getWallAngleString = () => {
@@ -203,6 +211,12 @@ export default function CameraScreen() {
                 onChangeText={setGymName}
                 testID="gym-name-input"
               />
+              <TouchableOpacity onPress={() => router.push('/gyms-map?from=camera')} style={{ backgroundColor: C.bg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="map" size={16} color={C.accent} />
+                <Text style={{color: C.accent, fontSize: 13, fontWeight: '700'}}>
+                  {gymName ? `Selected: ${gymName}` : 'MAP'}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity
@@ -360,6 +374,12 @@ export default function CameraScreen() {
             value={gymName}
             onChangeText={setGymName}
           />
+          <TouchableOpacity onPress={() => router.push('/gyms-map?from=camera')} style={{ backgroundColor: 'rgba(34,211,238,0.2)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+            <Ionicons name="map" size={14} color={C.accent} />
+            <Text style={{color: C.accent, fontSize: 13, fontWeight: '800'}}>
+              {gymName ? `Selected: ${gymName}` : 'MAP'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
 

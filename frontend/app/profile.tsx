@@ -152,15 +152,37 @@ export default function ProfileScreen() {
 					</View>
 				</Modal>
 
-				{/* Stats Grid */}
-				<View style={styles.statsGrid}>
-					<View style={[styles.statCard, { borderLeftWidth: 3, borderLeftColor: C.accent }]}>
-						<Text style={styles.statValue}>V7</Text>
-						<Text style={styles.statLabel}>Max Grade</Text>
-					</View>
-					<View style={[styles.statCard, { borderLeftWidth: 3, borderLeftColor: C.purple }]}>
-						<Text style={styles.statValue}>24</Text>
-						<Text style={styles.statLabel}>Age</Text>
+				{/* Account Info */}
+				<View style={styles.infoGroup}>
+					<Text style={styles.groupTitle}>ACCOUNT INFORMATION</Text>
+					<View style={styles.infoCard}>
+						<View style={styles.infoRow}>
+							<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+								<Ionicons name="finger-print-outline" size={16} color={C.secondary} />
+								<Text style={styles.infoLabel}>User ID</Text>
+							</View>
+							<Text style={styles.infoValue}>{user?.uid.substring(0, 10)}... (Guest)</Text>
+						</View>
+						<View style={styles.divider} />
+						<View style={styles.infoRow}>
+							<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+								<Ionicons name={user?.emailVerified ? "shield-checkmark" : "shield-outline"} size={16} color={user?.emailVerified ? C.accent : C.muted} />
+								<Text style={styles.infoLabel}>Status</Text>
+							</View>
+							<View style={[styles.badge, { backgroundColor: user?.emailVerified ? 'rgba(34,211,238,0.1)' : 'rgba(100,116,139,0.1)' }]}>
+								<Text style={[styles.badgeText, { color: user?.emailVerified ? C.accent : C.secondary }]}>
+									{user?.emailVerified ? 'VERIFIED' : 'ACTIVE'}
+								</Text>
+							</View>
+						</View>
+						<View style={styles.divider} />
+						<View style={styles.infoRow}>
+							<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+								<Ionicons name="calendar-outline" size={16} color={C.secondary} />
+								<Text style={styles.infoLabel}>Registered</Text>
+							</View>
+							<Text style={styles.infoValue}>{new Date(user?.metadata.creationTime || Date.now()).toLocaleDateString()}</Text>
+						</View>
 					</View>
 				</View>
 
@@ -210,10 +232,16 @@ const styles = StyleSheet.create({
 	cancelBtn: { marginTop: 20, padding: 14, alignItems: 'center' },
 	cancelBtnText: { color: C.error, fontSize: 16, fontWeight: '700' },
 
-	statsGrid: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 32 },
-	statCard: { flex: 1, backgroundColor: C.card, padding: 20, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: C.border },
-	statValue: { fontSize: 28, fontWeight: '900', color: C.primary },
-	statLabel: { fontSize: 12, color: C.secondary, textTransform: 'uppercase', marginTop: 4, letterSpacing: 0.5 },
+	infoGroup: { marginBottom: 32 },
+	groupTitle: { fontSize: 11, color: C.muted, fontWeight: '800', letterSpacing: 1.5, marginBottom: 12, marginLeft: 4, textTransform: 'uppercase' },
+	infoCard: { backgroundColor: C.card, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: C.border },
+	infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+	infoLabel: { fontSize: 13, color: C.secondary, fontWeight: '600' },
+	infoValue: { fontSize: 14, color: C.primary, fontWeight: '700' },
+	divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
+	badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: 'transparent' },
+	badgeText: { fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+
 	menuGroup: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border },
 	menuTitle: { fontSize: 12, color: C.muted, fontWeight: '700', letterSpacing: 1, marginBottom: 16, marginLeft: 8 },
 	menuItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 8 },

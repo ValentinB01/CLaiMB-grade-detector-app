@@ -97,7 +97,7 @@ class GradingService:
 
             # 4. Trimitem la Gemini 2.5 Flash
             response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-flash-latest',
                 contents=[
                     annotated_image,
                     prompt
@@ -125,20 +125,23 @@ class GradingService:
                 final_detected_routes.extend(split_routes)
             # ------------------------------------------
 
-            # Găsim gradul rutei principale (prima din listă)
-            best_route = final_detected_routes[0] if final_detected_routes else raw_detected_routes[0]
+            # Găsim gradul rutei principale (prima din listă) - Task Fix
+            best_route = final_detected_routes[0] if final_detected_routes else (raw_detected_routes[0] if raw_detected_routes else {})
             main_grade = best_route.get("estimated_grade", "V?")
 
-            logger.info(f"✅ Gemini a găsit {len(raw_detected_routes)} trasee. După procesarea DBSCAN, aplicația afișează {len(final_detected_routes)} trasee!")
+            # Extragem încrederea calculată de Gemini (Task KAN-11)
+            confidence = result_data.get("overall_confidence", 0.85)
+
+            logger.info(f"✅ Gemini a găsit {len(raw_detected_routes)} trasee. Grade: {main_grade}, Confidence: {confidence}")
             
-            # Returnăm exact structura cerută de FastAPI: Listă rute finală, grad general, încredere AI, Notițe.
-            return final_detected_routes, main_grade, 0.85, overall_notes
+            # Returnăm datele finale
+            return final_detected_routes, main_grade, confidence, overall_notes
 
         except Exception as e:
             logger.error(f"❌ Eroare în GradingService: {e}")
             return [], "V?", 0.0, f"Grading unavailable. Model error: {str(e)}"
 
-    def _draw_holds_on_image(self, image_base64: str, holds: List) -> Image.Image:
+    def _draw_holds_on_image(self, image_base64: str, holds: List, start_index: int = 0) -> Image.Image:
         """
         Plasează DOAR numărul prizei lângă ea, lăsând pixelii prizei 100% vizibili pentru AI.
         """
@@ -160,7 +163,7 @@ class GradingService:
             
             # Plasăm numărul (ID-ul) ușor decalat spre dreapta-sus față de centru, 
             # FĂRĂ să mai desenăm vreun punct sau dreptunghi!
-            text = str(idx)
+            text = str(idx + start_index)
             text_x, text_y = cx + 6, cy - 18 
             
             # Desenăm numărul cu un contur FOARTE fin negru pentru a fi lizibil 
@@ -285,7 +288,7 @@ class GradingService:
             """
 
             response = self.client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-flash-latest',
                 contents=[annotated_image, prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -304,3 +307,97 @@ class GradingService:
         except Exception as e:
             logger.error(f"❌ Error in grade_custom_route: {e}")
             return "V?", 0.0, f"Grading failed: {str(e)}"
+
+    async def chat_with_coach(
+        self,
+        image_base64: str,
+        holds: List[HoldLocation],
+        prompt: str,
+        history: List[dict] = None,
+        wall_angle: str = "vertical"
+    ) -> str:
+        """
+        Interactive Chat: Generates a response from the coach based on the user's prompt
+        and the specific route they selected (highlighted by the holds array).
+        """
+        if not self.client:
+            return "AI Coach unavailable due to missing API key."
+
+        try:
+            # 1. Annotate image ONLY with the holds of the selected route, starting from 1
+            annotated_image = self._draw_holds_on_image(image_base64, holds, start_index=1)
+
+            # 2. Build the context for the model
+            holds_summary = ""
+            for idx, h in enumerate(holds):
+                holds_summary += f"[{idx + 1}] Type: {h.hold_type}, X:{h.x:.2f}, Y:{h.y:.2f}\n"
+
+            system_instruction = f"""
+            You are an expert, encouraging bouldering coach named CLaiMB Coach.
+            The user is asking you for beta (advice) on a specific route they selected on the wall.
+            The wall angle is: {wall_angle}.
+
+            The user's selected route consists of {len(holds)} holds. 
+            These holds are explicitly marked with white ID numbers on the attached image.
+            Here is the raw data of these holds:
+            {holds_summary}
+
+            IMPORTANT INSTRUCTIONS for your behavior:
+            1. Keep your answers concise, practical, and highly specific to the holds marked with numbers.
+            2. If they ask "Where do I start?", tell them which numbered holds look like the best starting hand/foot placements.
+            3. Consider the wall angle when giving advice (e.g., overhangs require heel hooks and core tension).
+            4. Be encouraging but realistic.
+            
+            STYLE INSTRUCTIONS:
+            - Use **Bold text** for emphasis on critical moves or hold IDs.
+            - Use Bulleted lists for step-by-step beta (e.g., "1. Left hand to #3").
+            - Use Emojis (🧗‍♂️, 🎯, 💪, ⚡) to make the coach feel alive and professional.
+            - Structure your response as a "Pro Tip" or "Beta Breakdown".
+            """
+
+            # 3. Format history for Gemini structured format
+            # Format: 'user' or 'model'
+            formatted_history = []
+            if history:
+                for msg in history:
+                    role = "user" if msg["role"] == "user" else "model"
+                    formatted_history.append({"role": role, "parts": [{"text": msg["text"]}]})
+
+            # 4. We use the Chat mechanism from the new genai client
+            # The genai client allows starting a chat
+            chat = self.client.chats.create(
+                model='gemini-flash-latest',
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3
+                )
+            )
+
+            # Replay history if any (the current new SDK uses history param in create)
+            # Actually, `client.chats.create` supports passing `history` 
+            # To be safe and compatible with the new SDK, we'll pass the image and prompt in the first turn
+            # or just send the current message with the image as context.
+            
+            # Since chat history with images can be heavy or complex in the genai SDK, 
+            # we will send the current prompt and the image together.
+            
+            message_contents = [annotated_image, prompt]
+            
+            # If there is history, we construct a full prompt manually to avoid SDK chat history quirks with media
+            history_text = ""
+            if history:
+                for msg in history:
+                    sender = "User" if msg["role"] == "user" else "Coach"
+                    history_text += f"{sender}: {msg['text']}\n"
+                
+                full_prompt = f"Previous Chat History:\n{history_text}\n\nUser's Current Question: {prompt}"
+                message_contents = [annotated_image, full_prompt]
+
+            response = chat.send_message(message_contents)
+            
+            logger.info(f"✅ Coach replied: {response.text[:50]}...")
+            return response.text
+
+        except Exception as e:
+            logger.error(f"❌ Error in chat_with_coach: {e}")
+            return f"Sorry, I had trouble processing that request. Error: {str(e)}"

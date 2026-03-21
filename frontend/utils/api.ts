@@ -15,10 +15,36 @@ const getLocalServerUrl = () => {
   return 'http://[IP_ADDRESS]';
 };
 
-const BASE_URL = getLocalServerUrl();
-const BASE_URL = 'http://192.168.1.134:8000';
-const BASE_URL = 'http://192.168.56.1:8000';
-// const BASE_URL = 'http://172.20.10.2:8000'
+const BASE_URL = 'http://192.168.1.134:8000'; // IP-ul tău local (MAXIM STABIL)
+// const BASE_URL = 'https://climb-valy-v3-888.loca.lt'; // Tunel V3 (Ignoră-l dacă face figuri)
+
+// Fetch with timeout (AbortController) — 180s for slow AI inference endpoints (queued requests)
+// ---------------------------------------------------------------------------
+const fetchWithTimeout = (
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 180_000
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  const mergedHeaders: Record<string, string> = {
+    'Bypass-Tunnel-Reminder': 'true' // Mandatory for localtunnel APIs
+  };
+  if (options.headers) {
+    if (options.headers instanceof Headers) {
+      options.headers.forEach((val, key) => { mergedHeaders[key] = val; });
+    } else if (Array.isArray(options.headers)) {
+      options.headers.forEach(([key, val]) => { mergedHeaders[key] = val; });
+    } else {
+      Object.assign(mergedHeaders, options.headers);
+    }
+  }
+
+  return fetch(url, { ...options, headers: mergedHeaders, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+};
 
 export interface AnalyzePayload {
   image_base64: string;
@@ -27,18 +53,18 @@ export interface AnalyzePayload {
   user_id?: string;
 }
 
-// Funcție utilitară: ia ID-ul userului curent sau pune 'guest' dacă nu e logat
+// Returns the current user's UID, or 'guest' if not logged in
 const getCurrentUserId = () => {
   return auth.currentUser?.uid || 'guest';
 };
 
 export const analyzeRoute = async (payload: AnalyzePayload) => {
   try {
-    const userId = getCurrentUserId(); // Luăm ID-ul real!
+    const userId = getCurrentUserId();
 
-    console.log("📡 Încerc fetch la:", `${BASE_URL}/api/analyze`, "pentru user:", userId);
+    console.log('📡 Fetching:', `${BASE_URL}/api/analyze`, 'for user:', userId);
 
-    const res = await fetch(`${BASE_URL}/api/analyze`, {
+    const res = await fetchWithTimeout(`${BASE_URL}/api/analyze`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -46,35 +72,41 @@ export const analyzeRoute = async (payload: AnalyzePayload) => {
       },
       body: JSON.stringify({
         ...payload,
-        wall_angle: payload.wall_angle || "Vertical (0 degrees)",
-        user_id: userId // <-- Trimitem UID-ul real către Backend
+        wall_angle: payload.wall_angle || 'Vertical (0 degrees)',
+        user_id: userId,
       }),
     });
 
     if (!res.ok) {
       const errorData = await res.text();
-      console.error("❌ Serverul a răspuns cu eroare:", res.status, errorData);
+      console.error('❌ Server error:', res.status, errorData);
       throw new Error(`Server error: ${res.status}`);
     }
 
     return await res.json();
   } catch (error) {
-    console.error("❌ EROARE FETCH DETALIATĂ:", error);
+    console.error('❌ Fetch error:', error);
     throw error;
   }
 };
 
 export const fetchHistory = async () => {
   const userId = getCurrentUserId();
-  const res = await fetch(`${BASE_URL}/api/history?user_id=${userId}`); // <-- Filtrăm după user
+  const res = await fetchWithTimeout(`${BASE_URL}/api/history?user_id=${userId}`);
 
   if (!res.ok) throw new Error(`History fetch failed: ${res.status}`);
   return res.json();
 };
 
+export const fetchAnalysisById = async (analysisId: string) => {
+  const res = await fetchWithTimeout(`${BASE_URL}/api/analyze/${analysisId}`);
+  if (!res.ok) throw new Error(`Fetch analysis failed: ${res.status}`);
+  return res.json();
+};
+
 export const fetchStats = async () => {
   const userId = getCurrentUserId();
-  const res = await fetch(`${BASE_URL}/api/history/stats?user_id=${userId}`); // <-- Filtrăm după user
+  const res = await fetchWithTimeout(`${BASE_URL}/api/history/stats?user_id=${userId}`);
 
   if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
   return res.json();
@@ -82,8 +114,7 @@ export const fetchStats = async () => {
 
 export const deleteHistory = async (recordId: string) => {
   const userId = getCurrentUserId();
-  // Am adăugat ?user_id=${userId} aici, ca Backend-ul să știe că TU ai voie să ștergi traseul
-  const res = await fetch(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, {
+  const res = await fetchWithTimeout(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, {
     method: 'DELETE'
   });
 
@@ -97,7 +128,7 @@ export const updateHistoryStatus = async (
 ) => {
   const userId = getCurrentUserId();
 
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `${BASE_URL}/api/history/${recordId}/status?user_id=${userId}&status=${status}`,
     {
       method: 'PATCH',
@@ -109,6 +140,15 @@ export const updateHistoryStatus = async (
 
   if (!res.ok) throw new Error(`Status update failed: ${res.status}`);
   return res.json();
+};
+
+export const updateHistoryGym = async (recordId: string, gymName: string) => {
+  const userId = getCurrentUserId();
+  const response = await fetchWithTimeout(`${BASE_URL}/api/history/${recordId}/gym?user_id=${userId}&gym_name=${encodeURIComponent(gymName)}`, {
+    method: 'PATCH',
+  });
+  if (!response.ok) throw new Error('Failed to update gym');
+  return response.json();
 };
 
 
@@ -135,7 +175,7 @@ export const detectHolds = async (payload: DetectPayload) => {
     const userId = getCurrentUserId();
     console.log("🔍 Spray Wall: Detecting holds...");
 
-    const res = await fetch(`${BASE_URL}/api/detect`, {
+    const res = await fetchWithTimeout(`${BASE_URL}/api/detect`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -165,7 +205,7 @@ export const gradeSelection = async (payload: GradeSelectionPayload) => {
     const userId = getCurrentUserId();
     console.log("🎯 Spray Wall: Grading selection...");
 
-    const res = await fetch(`${BASE_URL}/api/grade-selection`, {
+    const res = await fetchWithTimeout(`${BASE_URL}/api/grade-selection`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -186,6 +226,54 @@ export const gradeSelection = async (payload: GradeSelectionPayload) => {
     return await res.json();
   } catch (error) {
     console.error("❌ GRADE SELECTION FETCH ERROR:", error);
+    throw error;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Chat / Ask the Coach API
+// ---------------------------------------------------------------------------
+
+export interface ChatMessagePayload {
+  role: 'user' | 'coach';
+  text: string;
+}
+
+export interface AskCoachPayload {
+  image_base64: string;
+  holds: any[];
+  prompt: string;
+  history?: ChatMessagePayload[];
+  wall_angle?: string;
+  gym_name?: string;
+}
+
+export const askCoach = async (payload: AskCoachPayload) => {
+  try {
+    const userId = getCurrentUserId();
+    console.log("💬 Coaching Chat:", `${BASE_URL}/api/chat`);
+
+    const res = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({
+        ...payload,
+        user_id: userId,
+      }),
+    });
+
+    if (!res.ok) {
+      const errorData = await res.text();
+      console.error("❌ Ask Coach error:", res.status, errorData);
+      throw new Error(`Chat error: ${res.status}`);
+    }
+
+    return await res.json();
+  } catch (error) {
+    console.error("❌ ASK COACH FETCH ERROR:", error);
     throw error;
   }
 };

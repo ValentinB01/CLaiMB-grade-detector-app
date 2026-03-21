@@ -103,3 +103,23 @@ async def update_history_status(record_id: str, user_id: str, status: RouteStatu
         return {"updated": False, "message": "Record not found or not authorized"}
 
     return {"updated": True, "id": record_id, "status": status.value}
+
+@router.patch("/history/{record_id}/gym")
+async def update_history_gym(record_id: str, user_id: str, gym_name: str):
+    """Update the gym name of a saved route."""
+    result = await db.db.route_history.update_one(
+        {"analysis_id": record_id, "user_id": user_id},
+        {"$set": {"gym_name": gym_name}}
+    )
+
+    # De rezervă, încercăm și cu 'id' dacă 'analysis_id' nu e prezent (pentru înregistrări vechi)
+    if result.matched_count == 0:
+        result = await db.db.route_history.update_one(
+            {"id": record_id, "user_id": user_id},
+            {"$set": {"gym_name": gym_name}}
+        )
+
+    if result.matched_count == 0:
+        return {"updated": False, "message": "Record not found or not authorized"}
+
+    return {"updated": True, "id": record_id, "gym_name": gym_name}

@@ -7,6 +7,7 @@ from models.schemas import (
     AnalysisRequest, AnalysisResponse, RouteRecord, RouteStatus,
     DetectRequest, DetectResponse,
     GradeSelectionRequest, GradeSelectionResponse,
+    ChatRequest, ChatResponse
 )
 from services.vision_service import VisionService
 from services.grading_service import GradingService
@@ -58,7 +59,9 @@ async def analyze_route(request: AnalysisRequest):
             thumbnail_base64=thumbnail,
             analyzed_at=processed_at,
             user_id=request.user_id if request.user_id else "guest",
-            detected_routes=detected_routes
+            detected_routes=detected_routes,
+            image_base64=request.image_base64,
+            holds=holds
         )
         await db.db.route_history.insert_one(record.model_dump())
         logger.info(f"Saved route record {record.analysis_id}")
@@ -81,17 +84,26 @@ async def analyze_route(request: AnalysisRequest):
 async def get_analysis(analysis_id: str):
     doc = await db.db.route_history.find_one({"analysis_id": analysis_id})
     if not doc:
+        # Fallback for old records that used mongo _id instead of analysis_id
+        from bson import ObjectId
+        try:
+            doc = await db.db.route_history.find_one({"_id": ObjectId(analysis_id)})
+        except Exception:
+            pass
+            
+    if not doc:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     return AnalysisResponse(
         analysis_id=doc["analysis_id"],
-        holds=[],  
+        holds=doc.get("holds", []),
         grade=doc.get("grade", "V?"),
         confidence=doc.get("confidence", 0.0),
         notes=doc.get("notes", ""),
         gym_name=doc.get("gym_name", "Unknown Gym"),
         processed_at=doc.get("analyzed_at", ""),
-        detected_routes=doc.get("detected_routes", []) # Încărcăm traseele și din istoric
+        detected_routes=doc.get("detected_routes", []),
+        image_base64=doc.get("image_base64", None)
     )
 
 
@@ -161,6 +173,8 @@ async def grade_selection(request: GradeSelectionRequest):
             thumbnail_base64=thumbnail,
             analyzed_at=processed_at,
             user_id=request.user_id if request.user_id else "guest",
+            image_base64=request.image_base64,
+            holds=selected_holds
         )
         await db.db.route_history.insert_one(record.model_dump())
         logger.info(f"Saved spray wall route {analysis_id}")
@@ -176,4 +190,33 @@ async def grade_selection(request: GradeSelectionRequest):
         gym_name=request.gym_name or "Unknown Gym",
         wall_angle=request.wall_angle or "vertical",
         processed_at=processed_at
+    )
+
+# ---------------------------------------------------------------------------
+# Ask the Coach Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/chat", response_model=ChatResponse)
+async def ask_coach(request: ChatRequest):
+    """Interactive AI Coach for a specific route."""
+    logger.info(f"💬 Chatting with Coach. Gym: {request.gym_name}, Angle: {request.wall_angle}")
+
+    try:
+        # Convert Pydantic history objects to dicts if any
+        history_dicts = [{"role": msg.role, "text": msg.text} for msg in request.history]
+        
+        reply_text = await _grading.chat_with_coach(
+            image_base64=request.image_base64,
+            holds=request.holds,
+            prompt=request.prompt,
+            history=history_dicts,
+            wall_angle=request.wall_angle
+        )
+    except Exception as exc:
+        logger.error(f"Chat failed: {exc}")
+        raise HTTPException(status_code=500, detail=f"Coach is currently unavailable: {str(exc)}")
+
+    return ChatResponse(
+        reply=reply_text,
+        processed_at=datetime.now(timezone.utc).isoformat()
     )

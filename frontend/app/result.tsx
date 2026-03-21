@@ -8,11 +8,17 @@ import {
   StyleSheet,
   Dimensions,
   LayoutChangeEvent,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Rect, Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   getPendingResult,
@@ -20,6 +26,7 @@ import {
   AnalysisResult,
   HoldLocation
 } from '../utils/store';
+import { askCoach, fetchAnalysisById, updateHistoryGym } from '../utils/api';
 import DrawerMenu from '../components/DrawerMenu';
 
 const { width: SCREEN_W } = Dimensions.get('window');
@@ -75,6 +82,7 @@ function ConfidenceBar({ value }: { value: number }) {
 
 export default function ResultScreen() {
   const router = useRouter();
+  const { id, selected_gym } = useLocalSearchParams<{ id: string, selected_gym?: string }>();
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [imgLayout, setImgLayout] = useState({ width: 0, height: 0 });
   const [selectedHold, setSelectedHold] = useState<HoldLocation | null>(null);
@@ -83,10 +91,100 @@ export default function ResultScreen() {
   const [imgAspect, setImgAspect] = useState<number>(3 / 4);
   const [activeRouteIdx, setActiveRouteIdx] = useState(0);
 
+  // --- COACH CHAT STATE ---
+  const [chatVisible, setChatVisible] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'coach'; text: string }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || !result || isTyping) return;
+    const userText = chatInput.trim();
+    setChatInput('');
+    Keyboard.dismiss();
+
+    const newMessages = [...chatMessages, { role: 'user' as const, text: userText }];
+    setChatMessages(newMessages);
+    setIsTyping(true);
+
+    try {
+      const routes = result.detected_routes || [];
+      const hasRoutes = routes.length > 0;
+      const currentRoute = hasRoutes ? routes[activeRouteIdx < routes.length ? activeRouteIdx : 0] : null;
+      
+      const activeHolds = hasRoutes && currentRoute
+        ? currentRoute.holds_ids.map(id => result.holds[id]).filter(Boolean)
+        : result.holds || [];
+
+      // Send the request
+      const res = await askCoach({
+        image_base64: result.image_base64 || '',
+        holds: activeHolds,
+        prompt: userText,
+        history: chatMessages,
+        gym_name: result.gym_name,
+        wall_angle: (result as any).wall_angle || 'vertical' // Type cast in case wall_angle isn't in AnalysisResult schema type locally
+      });
+
+      setChatMessages([...newMessages, { role: 'coach', text: res.reply }]);
+    } catch (e: any) {
+      setChatMessages([...newMessages, { role: 'coach', text: `Error: ${e.message}` }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const syncGymUpdate = async (recordId: string, gymName: string) => {
+    try {
+      await updateHistoryGym(recordId, gymName);
+      console.log(`✅ Gym updated in DB: ${gymName}`);
+    } catch (e) {
+      console.error("Failed to sync gym update:", e);
+    }
+  };
+
   useEffect(() => {
-    const r = getPendingResult();
-    if (r) setResult(r);
-  }, []);
+    if (id) {
+      fetchAnalysisById(id)
+        .then(setResult)
+        .catch(err => console.error("Error loading history item:", err));
+    } else {
+      const r = getPendingResult();
+      if (r) setResult(r);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (selected_gym && result) {
+      // 1. Update local state for immediate UI feedback
+      setResult(prev => prev ? { ...prev, gym_name: selected_gym } : null);
+      
+      // 2. Persist to DB if we have an ID
+      const recordId = id || result.analysis_id;
+      if (recordId) {
+        syncGymUpdate(recordId, selected_gym);
+      }
+    }
+  }, [selected_gym, !!result]);
+
+  const MarkdownText = ({ text, style }: { text: string; style?: any }) => {
+    // Simple regex to split by bold groups **text**
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    return (
+      <Text style={style}>
+        {parts.map((part, i) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return (
+              <Text key={i} style={{ fontWeight: 'bold', color: '#fff' }}>
+                {part.slice(2, -2)}
+              </Text>
+            );
+          }
+          return part;
+        })}
+      </Text>
+    );
+  };
 
   if (!result) {
     return (
@@ -173,7 +271,10 @@ export default function ResultScreen() {
                     const rectX = cx - boxW / 2;
                     const rectY = cy - boxH / 2;
 
-                    const isInActiveRoute = currentRoute ? currentRoute.holds_ids.includes(idx) : true;
+                    const activeIdxPos = currentRoute ? currentRoute.holds_ids.indexOf(idx) : idx;
+                    const isInActiveRoute = activeIdxPos !== -1;
+                    const displayNum = activeIdxPos + 1;
+
                     const baseColor = holdColor(hold.hold_type);
                     const drawColor = isInActiveRoute ? baseColor : C.muted;
                     const opacity = isInActiveRoute ? 1 : 0.15;
@@ -194,16 +295,18 @@ export default function ResultScreen() {
                           rx={4}
                           onPress={() => setSelectedHold(isSelected ? null : hold)}
                         />
-                        {isSelected && isInActiveRoute && (
+                        {isInActiveRoute && (
                           <SvgText
                             x={cx}
-                            y={rectY - 6}
-                            fontSize={10}
-                            fill={drawColor}
+                            y={cy + 4}
+                            fontSize={12}
+                            fill="#ffffff"
+                            stroke="#000000"
+                            strokeWidth={1}
                             textAnchor="middle"
-                            fontWeight="bold"
+                            fontWeight="900"
                           >
-                            {hold.hold_type}
+                            {displayNum}
                           </SvgText>
                         )}
                       </React.Fragment>
@@ -222,6 +325,29 @@ export default function ResultScreen() {
           <View style={[styles.gradeBadgeOverlay, { borderColor: gColor, backgroundColor: '#0f172acc' }]}>
             <Text style={[styles.gradeOverlayText, { color: gColor }]}>{displayGrade}</Text>
           </View>
+        </View>
+
+        {/* --- LOCATION BOX (Gym Card) --- */}
+        <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+          <Text style={styles.confTitle}>GYM LOCATION</Text>
+          <TouchableOpacity 
+            style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#334155' }}
+            onPress={() => router.push({ pathname: '/gyms-map', params: { from: 'result', current_id: id || '' } })}
+          >
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(34,211,238,0.1)', alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
+              <Ionicons name="location" size={24} color={C.accent} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: C.primary, fontSize: 16, fontWeight: '700' }}>
+                {result.gym_name && result.gym_name !== 'Unknown Gym' ? result.gym_name : 'No gym selected'}
+              </Text>
+              <Text style={{ color: C.secondary, fontSize: 13, marginTop: 2 }}>Tap map to set location</Text>
+            </View>
+            <View style={{ backgroundColor: 'rgba(34,211,238,0.15)', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Ionicons name="map" size={18} color={C.accent} />
+              <Text style={{ color: C.accent, fontSize: 14, fontWeight: '800' }}>MAP</Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* --- SELECTOR DE TRASEE (SLIDER) --- */}
@@ -311,6 +437,19 @@ export default function ResultScreen() {
           </View>
         ) : null}
 
+        {/* Buton Chat Coach */}
+        <TouchableOpacity style={styles.askCoachBtn} onPress={() => setChatVisible(true)}>
+          <LinearGradient
+            colors={['#8b5cf6', '#d946ef']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.askCoachGradient}
+          >
+            <Ionicons name="chatbubbles" size={20} color="#fff" />
+            <Text style={styles.askCoachBtnText}>ASK COACH FOR BETA</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+
         {/* Butoane Acțiuni */}
         <View style={styles.actions}>
           <TouchableOpacity style={styles.primaryAction} onPress={() => router.replace('/(tabs)/camera')}>
@@ -331,6 +470,59 @@ export default function ResultScreen() {
         </View>
 
       </ScrollView>
+
+      {/* --- CHAT MODAL --- */}
+      <Modal visible={chatVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBg}>
+          <View style={styles.chatContainer}>
+            <View style={styles.chatHeader}>
+              <Text style={styles.chatTitle}>CLaiMB Coach</Text>
+              <TouchableOpacity onPress={() => setChatVisible(false)} style={styles.closeBtn}>
+                <Ionicons name="close" size={24} color={C.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.chatScroll} contentContainerStyle={styles.chatContent}>
+              {chatMessages.length === 0 && (
+                <View style={styles.chatEmpty}>
+                  <Ionicons name="chatbubbles-outline" size={48} color={C.muted} />
+                  <Text style={styles.chatEmptyText}>Ask about hand placements, body tension, or sequence details.</Text>
+                </View>
+              )}
+              {chatMessages.map((msg, idx) => (
+                <View key={idx} style={[styles.msgBubble, msg.role === 'user' ? styles.msgUser : styles.msgCoach]}>
+                  {msg.role === 'coach' && <Ionicons name="sparkles" size={14} color="#fff" style={{ marginRight: 6 }} />}
+                  <MarkdownText 
+                    text={msg.text} 
+                    style={[styles.msgText, msg.role === 'user' ? { color: '#000' } : { color: '#f8fafc' }]} 
+                  />
+                </View>
+              ))}
+              {isTyping && (
+                <View style={[styles.msgBubble, styles.msgCoach, { width: 60, alignItems: 'center' }]}>
+                  <ActivityIndicator size="small" color="#fff" />
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.chatInputRow}>
+              <TextInput
+                style={styles.chatInput}
+                placeholder="Ask for beta..."
+                placeholderTextColor={C.muted}
+                value={chatInput}
+                onChangeText={setChatInput}
+                multiline
+                maxLength={400}
+              />
+              <TouchableOpacity style={[styles.chatSendBtn, !chatInput.trim() && { opacity: 0.5 }]} onPress={handleSendChat} disabled={!chatInput.trim() || isTyping}>
+                <Ionicons name="send" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -388,5 +580,26 @@ const styles = StyleSheet.create({
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: 11, color: C.secondary },
   noImagePlaceholder: { backgroundColor: C.card, justifyContent: 'center', alignItems: 'center' },
-  noImageText: { color: C.muted, marginTop: 10 }
+  noImageText: { color: C.muted, marginTop: 10 },
+  
+  askCoachBtn: { marginHorizontal: 16, marginBottom: 16, borderRadius: 14, overflow: 'hidden' },
+  askCoachGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
+  askCoachBtnText: { fontSize: 13, fontWeight: '800', color: '#fff', textTransform: 'uppercase', letterSpacing: 1 },
+
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  chatContainer: { backgroundColor: C.bg, height: '70%', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' },
+  chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderColor: C.border },
+  chatTitle: { fontSize: 18, fontWeight: '700', color: C.primary },
+  closeBtn: { padding: 4 },
+  chatScroll: { flex: 1, backgroundColor: '#0b1120' },
+  chatContent: { padding: 16, gap: 12 },
+  chatEmpty: { alignItems: 'center', marginTop: 40 },
+  chatEmptyText: { color: C.muted, textAlign: 'center', marginTop: 12, marginHorizontal: 20 },
+  msgBubble: { padding: 12, borderRadius: 16, maxWidth: '85%' },
+  msgUser: { backgroundColor: '#e2e8f0', alignSelf: 'flex-end', borderBottomRightRadius: 4 },
+  msgCoach: { backgroundColor: C.card, alignSelf: 'flex-start', borderBottomLeftRadius: 4, flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: C.border },
+  msgText: { fontSize: 15, lineHeight: 22 },
+  chatInputRow: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderColor: C.border, backgroundColor: C.bg, alignItems: 'flex-end', gap: 10 },
+  chatInput: { flex: 1, minHeight: 44, maxHeight: 100, backgroundColor: C.card, borderRadius: 22, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, color: C.primary, fontSize: 15, borderWidth: 1, borderColor: C.border },
+  chatSendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center' }
 });

@@ -35,6 +35,7 @@ const MENU_ITEMS: MenuItem[] = [
 	{ icon: 'home', label: 'Home', route: '/(tabs)', color: C.accent },
 	{ icon: 'camera', label: 'Scan', route: '/(tabs)/camera', color: C.accent },
 	{ icon: 'time', label: 'History', route: '/(tabs)/history', color: C.purple },
+	{ icon: 'map', label: 'Gyms Map', route: '/gyms-map', color: C.warning },
 	{ icon: 'person', label: 'Profile', route: '/profile', color: C.success },
 	{ icon: 'information-circle', label: 'About Us', route: '/about', color: C.accent },
 	{ icon: 'mail', label: 'Contact', route: '/contact', color: C.warning },
