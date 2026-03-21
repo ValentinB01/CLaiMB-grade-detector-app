@@ -3,11 +3,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, StyleSheet } from 'react-native';
 
 const C = {
-  bg: '#09090b',
-  tabBar: '#111113',
-  tabBorder: '#27272a',
+  bg: '#0f172a',
+  tabBar: '#0f172a',
+  tabBorder: '#1e293b',
   active: '#22d3ee',
-  inactive: '#52525b',
+  inactive: '#64748b',
 };
 
 function TabIcon({
@@ -73,6 +73,13 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      <Tabs.Screen
+        name="profile"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
@@ -97,6 +104,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   iconWrapActive: {
-    backgroundColor: 'rgba(34,211,238,0.12)',
+    backgroundColor: 'rgba(34,211,238,0.15)',
   },
 });

@@ -13,34 +13,37 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Rect, Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { 
-  getPendingResult, 
-  clearPendingResult, 
-  AnalysisResult, 
-  HoldLocation 
+import { LinearGradient } from 'expo-linear-gradient';
+import {
+  getPendingResult,
+  clearPendingResult,
+  AnalysisResult,
+  HoldLocation
 } from '../utils/store';
+import DrawerMenu from '../components/DrawerMenu';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
 const C = {
-  bg: '#09090b',
-  card: '#18181b',
-  border: '#27272a',
-  primary: '#fafafa',
-  secondary: '#a1a1aa',
-  muted: '#52525b',
+  bg: '#0f172a',
+  card: '#1e293b',
+  border: '#334155',
+  primary: '#f8fafc',
+  secondary: '#94a3b8',
+  muted: '#64748b',
   accent: '#22d3ee',
+  purple: '#a78bfa',
   success: '#4ade80',
   warning: '#fbbf24',
   error: '#ef4444',
 };
 
 const HOLD_COLORS: Record<string, string> = {
-  start:   '#4ade80',
-  finish:  '#f472b6',
-  hand:    '#22d3ee',
-  foot:    '#fbbf24',
-  unknown: '#a1a1aa',
+  start: '#4ade80',
+  finish: '#f472b6',
+  hand: '#22d3ee',
+  foot: '#fbbf24',
+  unknown: '#94a3b8',
 };
 
 function holdColor(type: string) {
@@ -75,11 +78,9 @@ export default function ResultScreen() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [imgLayout, setImgLayout] = useState({ width: 0, height: 0 });
   const [selectedHold, setSelectedHold] = useState<HoldLocation | null>(null);
-  
-  // NOU: State pentru a păstra aspect ratio-ul dinamic (fallback la 3/4)
+  const [drawerVisible, setDrawerVisible] = useState(false);
+
   const [imgAspect, setImgAspect] = useState<number>(3 / 4);
-  
-  // State pentru slider-ul de trasee
   const [activeRouteIdx, setActiveRouteIdx] = useState(0);
 
   useEffect(() => {
@@ -121,25 +122,30 @@ export default function ResultScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.backCircle} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color={C.primary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity style={styles.backCircle} onPress={() => setDrawerVisible(true)}>
+            <Ionicons name="menu" size={18} color={C.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.backCircle} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={20} color={C.primary} />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.topTitle}>Route Analysis</Text>
-        <View style={{ width: 40 }} />
+        <View style={{ width: 80 }} />
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        
+
         {/* Imagine + Overlays */}
         <View style={styles.imageContainer}>
           {imageUri ? (
             <View onLayout={onImageLayout} style={[styles.imageWrap, { aspectRatio: imgAspect }]}>
-              <Image 
-                source={{ uri: imageUri }} 
-                style={styles.image} 
-                resizeMode="cover" 
-                // NOU: Citim lățimea și înălțimea la încărcarea imaginii
+              <Image
+                source={{ uri: imageUri }}
+                style={styles.image}
+                resizeMode="cover"
                 onLoad={(e) => {
                   const { width, height } = e.nativeEvent.source;
                   if (width && height) {
@@ -147,26 +153,26 @@ export default function ResultScreen() {
                   }
                 }}
               />
-              
+
               {imgLayout.width > 0 && result.holds && result.holds.length > 0 && (
                 <Svg
                   style={StyleSheet.absoluteFill}
                   width={imgLayout.width}
                   height={imgLayout.height}
                 >
-                 {result.holds.map((hold, idx) => {
+                  {result.holds.map((hold, idx) => {
                     const cx = hold.x * imgLayout.width;
                     const cy = hold.y * imgLayout.height;
-                    
+
                     const baseW = hold.width ? hold.width * imgLayout.width : hold.radius * 2 * imgLayout.width;
                     const baseH = hold.height ? hold.height * imgLayout.height : hold.radius * 2 * imgLayout.height;
-                    
-                    const boxW = baseW * 0.90; 
-                    const boxH = baseH * 0.90; 
+
+                    const boxW = baseW * 0.90;
+                    const boxH = baseH * 0.90;
 
                     const rectX = cx - boxW / 2;
                     const rectY = cy - boxH / 2;
-                    
+
                     const isInActiveRoute = currentRoute ? currentRoute.holds_ids.includes(idx) : true;
                     const baseColor = holdColor(hold.hold_type);
                     const drawColor = isInActiveRoute ? baseColor : C.muted;
@@ -185,7 +191,7 @@ export default function ResultScreen() {
                           stroke={drawColor}
                           strokeWidth={isSelected ? 3 : 2}
                           opacity={opacity}
-                          rx={4} 
+                          rx={4}
                           onPress={() => setSelectedHold(isSelected ? null : hold)}
                         />
                         {isSelected && isInActiveRoute && (
@@ -213,7 +219,7 @@ export default function ResultScreen() {
             </View>
           )}
 
-          <View style={[styles.gradeBadgeOverlay, { borderColor: gColor, backgroundColor: '#09090bcc' }]}>
+          <View style={[styles.gradeBadgeOverlay, { borderColor: gColor, backgroundColor: '#0f172acc' }]}>
             <Text style={[styles.gradeOverlayText, { color: gColor }]}>{displayGrade}</Text>
           </View>
         </View>
@@ -248,16 +254,16 @@ export default function ResultScreen() {
           </View>
         )}
 
-        {/* Legendă culori prize (Arătată doar dacă nu avem trasee specifice detectate) */}
+        {/* Legendă culori prize */}
         {!hasRoutes && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.legendScroll} contentContainerStyle={styles.legend}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.legendScroll} contentContainerStyle={styles.legend}>
             {Object.entries(HOLD_COLORS).map(([type, color]) => (
-                <View key={type} style={styles.legendItem}>
+              <View key={type} style={styles.legendItem}>
                 <View style={[styles.legendDot, { backgroundColor: color }]} />
                 <Text style={styles.legendText}>{type}</Text>
-                </View>
+              </View>
             ))}
-            </ScrollView>
+          </ScrollView>
         )}
 
         {/* Info Priză Selectată */}
@@ -294,11 +300,11 @@ export default function ResultScreen() {
           <ConfidenceBar value={result.confidence} />
         </View>
 
-        {/* Note de la Coach (Gemini Reasoning) */}
+        {/* Note de la Coach */}
         {displayNotes ? (
           <View style={styles.notesCard}>
             <View style={styles.notesHeader}>
-              <Ionicons name="sparkles" size={16} color={C.accent} />
+              <Ionicons name="sparkles" size={16} color={C.purple} />
               <Text style={styles.notesTitle}>Coach Analysis</Text>
             </View>
             <Text style={styles.notesText}>{displayNotes}</Text>
@@ -308,8 +314,15 @@ export default function ResultScreen() {
         {/* Butoane Acțiuni */}
         <View style={styles.actions}>
           <TouchableOpacity style={styles.primaryAction} onPress={() => router.replace('/(tabs)/camera')}>
-            <Ionicons name="camera" size={18} color="#09090b" />
-            <Text style={styles.primaryActionText}>NEW SCAN</Text>
+            <LinearGradient
+              colors={['#22d3ee', '#6366f1']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.primaryActionGradient}
+            >
+              <Ionicons name="camera" size={18} color="#fff" />
+              <Text style={styles.primaryActionText}>NEW SCAN</Text>
+            </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryAction} onPress={() => router.replace('/(tabs)/history')}>
             <Ionicons name="time-outline" size={18} color={C.primary} />
@@ -329,17 +342,14 @@ const styles = StyleSheet.create({
   topTitle: { fontSize: 16, fontWeight: '700', color: C.primary },
   scroll: { paddingBottom: 40 },
   imageContainer: { position: 'relative', marginHorizontal: 16, borderRadius: 16, overflow: 'hidden', marginBottom: 12 },
-  
-  // NOU: Am șters aspectRatio de aici, acum este doar 100% lățime (înălțimea e calculată de aspect ratio dinamic)
-  imageWrap: { width: '100%' }, 
-  
+  imageWrap: { width: '100%' },
   image: { width: '100%', height: '100%' },
   gradeBadgeOverlay: { position: 'absolute', top: 16, right: 16, borderWidth: 2, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8 },
   gradeOverlayText: { fontSize: 28, fontWeight: '900' },
   routeSelector: { marginBottom: 16 },
   selectorTitle: { fontSize: 11, color: C.secondary, marginLeft: 16, marginBottom: 8, letterSpacing: 1, textTransform: 'uppercase' },
   routeList: { paddingHorizontal: 16, gap: 12 },
-  routeCard: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#1c1c1f', borderRadius: 14, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', minWidth: 100 },
+  routeCard: { paddingHorizontal: 20, paddingVertical: 12, backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', minWidth: 100 },
   routeColorText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
   routeGradeText: { fontSize: 22, fontWeight: '900', marginTop: 2 },
   holdInfoCard: { marginHorizontal: 16, backgroundColor: C.card, borderRadius: 10, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: C.accent + '44' },
@@ -358,13 +368,14 @@ const styles = StyleSheet.create({
   confTrack: { flex: 1, height: 6, backgroundColor: C.border, borderRadius: 3 },
   confFill: { height: '100%', borderRadius: 3 },
   confLabel: { fontSize: 13, fontWeight: '700', color: C.primary },
-  notesCard: { marginHorizontal: 16, backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: C.border },
+  notesCard: { marginHorizontal: 16, backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: C.purple + '30' },
   notesHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   notesTitle: { fontSize: 14, fontWeight: '700', color: C.primary },
   notesText: { fontSize: 14, color: C.secondary, lineHeight: 22 },
   actions: { flexDirection: 'row', gap: 10, marginHorizontal: 16 },
-  primaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16 },
-  primaryActionText: { fontSize: 13, fontWeight: '800', color: '#09090b' },
+  primaryAction: { flex: 1, borderRadius: 14, overflow: 'hidden' },
+  primaryActionGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
+  primaryActionText: { fontSize: 13, fontWeight: '800', color: '#fff' },
   secondaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.card, borderRadius: 14, paddingVertical: 16, borderWidth: 1, borderColor: C.border },
   secondaryActionText: { fontSize: 13, fontWeight: '700', color: C.primary },
   noResult: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },

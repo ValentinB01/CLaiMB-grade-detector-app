@@ -16,6 +16,9 @@ const getLocalServerUrl = () => {
 };
 
 const BASE_URL = getLocalServerUrl();
+const BASE_URL = 'http://192.168.1.134:8000';
+const BASE_URL = 'http://192.168.56.1:8000';
+// const BASE_URL = 'http://172.20.10.2:8000'
 
 export interface AnalyzePayload {
   image_base64: string;
@@ -32,26 +35,26 @@ const getCurrentUserId = () => {
 export const analyzeRoute = async (payload: AnalyzePayload) => {
   try {
     const userId = getCurrentUserId(); // Luăm ID-ul real!
-    
+
     console.log("📡 Încerc fetch la:", `${BASE_URL}/api/analyze`, "pentru user:", userId);
-    
+
     const res = await fetch(`${BASE_URL}/api/analyze`, {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({ 
-        ...payload, 
+      body: JSON.stringify({
+        ...payload,
         wall_angle: payload.wall_angle || "Vertical (0 degrees)",
         user_id: userId // <-- Trimitem UID-ul real către Backend
       }),
     });
-    
+
     if (!res.ok) {
-        const errorData = await res.text();
-        console.error("❌ Serverul a răspuns cu eroare:", res.status, errorData);
-        throw new Error(`Server error: ${res.status}`);
+      const errorData = await res.text();
+      console.error("❌ Serverul a răspuns cu eroare:", res.status, errorData);
+      throw new Error(`Server error: ${res.status}`);
     }
 
     return await res.json();
@@ -64,7 +67,7 @@ export const analyzeRoute = async (payload: AnalyzePayload) => {
 export const fetchHistory = async () => {
   const userId = getCurrentUserId();
   const res = await fetch(`${BASE_URL}/api/history?user_id=${userId}`); // <-- Filtrăm după user
-  
+
   if (!res.ok) throw new Error(`History fetch failed: ${res.status}`);
   return res.json();
 };
@@ -72,7 +75,7 @@ export const fetchHistory = async () => {
 export const fetchStats = async () => {
   const userId = getCurrentUserId();
   const res = await fetch(`${BASE_URL}/api/history/stats?user_id=${userId}`); // <-- Filtrăm după user
-  
+
   if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
   return res.json();
 };
@@ -80,10 +83,10 @@ export const fetchStats = async () => {
 export const deleteHistory = async (recordId: string) => {
   const userId = getCurrentUserId();
   // Am adăugat ?user_id=${userId} aici, ca Backend-ul să știe că TU ai voie să ștergi traseul
-  const res = await fetch(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, { 
-    method: 'DELETE' 
+  const res = await fetch(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, {
+    method: 'DELETE'
   });
-  
+
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json();
 };
