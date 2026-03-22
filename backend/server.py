@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Încarcă variabilele de mediu
 load_dotenv(Path(__file__).parent / ".env")
@@ -15,6 +16,7 @@ load_dotenv(Path(__file__).parent / ".env")
 # Importuri rute și bază de date
 from routes.analysis import router as analysis_router
 from routes.history import router as history_router
+from routes.pose import router as pose_router
 from database import connect_to_mongo, close_mongo_connection
 
 # ---------------------------------------------------------------------------
@@ -38,6 +40,10 @@ app = FastAPI(
     lifespan=lifespan # Integrăm lifespan-ul aici
 )
 
+import os
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # ---------------------------------------------------------------------------
 # 3. Middleware (CORS) - Esențial pentru conexiunea cu telefonul
 # ---------------------------------------------------------------------------
@@ -54,6 +60,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
 app.include_router(history_router, prefix="/api", tags=["History"])
+app.include_router(pose_router, prefix="/api/pose", tags=["Pose Analysis"])
 
 # ---------------------------------------------------------------------------
 # 5. Health check

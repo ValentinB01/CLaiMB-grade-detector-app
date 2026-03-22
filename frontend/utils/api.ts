@@ -15,10 +15,8 @@ const getLocalServerUrl = () => {
   return 'http://[IP_ADDRESS]';
 };
 
-const BASE_URL = getLocalServerUrl();
-const BASE_URL = 'http://192.168.1.134:8000';
-const BASE_URL = 'http://192.168.56.1:8000';
-// const BASE_URL = 'http://172.20.10.2:8000'
+// const BASE_URL = getLocalServerUrl();
+const BASE_URL = 'http://10.40.141.116:8000'; //ASTA MERGE LA FACULTATE!!!!!!!!!!!!!!!!! NU STERGE!!!!!!!!!!!
 
 export interface AnalyzePayload {
   image_base64: string;

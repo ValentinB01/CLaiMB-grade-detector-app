@@ -7,3 +7,6 @@ pillow
 google-genai
 numpy
 scikit-learn
+ultralytics
+opencv-python-headless
+python-multipart

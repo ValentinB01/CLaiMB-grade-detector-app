@@ -3,9 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { fetchHistory, deleteHistory } from '../../utils/api';
 import DrawerMenu from '../../components/DrawerMenu';
-import { useFocusEffect } from 'expo-router';
 import { fetchHistory, deleteHistory, updateHistoryStatus } from '../../utils/api';
 
 const C = {
@@ -27,18 +25,9 @@ interface RouteRecord {
   grade: string;
   analyzed_at: string;
   status: 'Project' | 'Sent' | 'Topped';
+  notes?: string;
 }
 
-const C = {
-  bg: '#0f172a',
-  card: '#1e293b',
-  border: '#334155',
-  primary: '#f8fafc',
-  secondary: '#94a3b8',
-  accent: '#22d3ee',
-  purple: '#a78bfa',
-  error: '#ef4444',
-};
 
 export default function HistoryScreen() {
   const [routes, setRoutes] = useState<RouteRecord[]>([]);
@@ -243,5 +232,7 @@ statusBtnTextActive: {
   },
   gradeText: { color: C.accent, fontWeight: '900', fontSize: 18 },
   gymName: { color: C.primary, fontWeight: '700', fontSize: 16 },
-  date: { color: C.secondary, fontSize: 12, marginTop: 2 }
+  date: { color: C.secondary, fontSize: 12, marginTop: 2 },
+  notesWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.border },
+  notes: { color: C.secondary, fontSize: 13, flex: 1 }
 });

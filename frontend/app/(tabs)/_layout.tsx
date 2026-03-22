@@ -73,11 +73,13 @@ export default function TabLayout() {
           ),
         }}
       />
-
       <Tabs.Screen
-        name="profile"
+        name="community"
         options={{
-          href: null,
+          title: 'Community',
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="people" color={color} focused={focused} />
+          ),
         }}
       />
     </Tabs>
