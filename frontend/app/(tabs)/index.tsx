@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,9 +8,11 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { LineChart } from 'react-native-chart-kit';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { fetchStats, fetchHistory } from '../../utils/api';
@@ -53,6 +55,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentRoute[]>([]);
+  const [allRoutes, setAllRoutes] = useState<RecentRoute[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -65,6 +68,7 @@ export default function HomeScreen() {
       ]);
       setStats(statsData);
       setRecent((historyData.routes || []).slice(0, 3));
+      setAllRoutes(historyData.routes || []);
     } catch {
       setStats({ total_routes: 0, best_grade: null, grades: {} });
     } finally {
@@ -76,6 +80,42 @@ export default function HomeScreen() {
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
   const onRefresh = () => { setRefreshing(true); loadData(); };
+
+  // Generate charting data via useMemo filtering the entire history timeline sequentially
+  const chartData = useMemo(() => {
+    if (!allRoutes || allRoutes.length === 0) return null;
+    
+    // Filter to only include routes from the last 14 days
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    
+    const recentRoutes = allRoutes.filter(r => new Date(r.analyzed_at) >= twoWeeksAgo);
+
+    if (recentRoutes.length === 0) return null;
+
+    // Reverse array to chronologically sort (oldest -> newest) based on timestamp
+    const sorted = [...recentRoutes].sort((a, b) => 
+      new Date(a.analyzed_at).getTime() - new Date(b.analyzed_at).getTime()
+    );
+    
+    const labels = sorted.map(r => {
+      const d = new Date(r.analyzed_at);
+      return d.getDate().toString();
+    });
+
+    const data = sorted.map(r => parseInt(r.grade.replace('V', ''), 10) || 0);
+
+    return {
+      labels: labels.length > 0 ? labels : [''],
+      datasets: [
+        {
+          data: data.length > 0 ? data : [0],
+          color: (opacity = 1) => `rgba(34, 211, 238, ${opacity})`,
+          strokeWidth: 3
+        }
+      ]
+    };
+  }, [allRoutes]);
 
   const gradeColor = (grade: string) => {
     const n = parseInt(grade.replace('V', ''));
@@ -195,6 +235,24 @@ export default function HomeScreen() {
           </LinearGradient>
         </TouchableOpacity>
 
+        {/* Pose Analysis CTA */}
+        <TouchableOpacity
+          style={styles.ctaBtn}
+          onPress={() => router.push('/pose')}
+          activeOpacity={0.85}
+        >
+          <LinearGradient
+            colors={['#a78bfa', '#f59e0b']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.ctaGradient}
+          >
+            <Ionicons name="body-outline" size={22} color="#fff" />
+            <Text style={styles.ctaBtnText}>ANALYZE CLIMBING POSE</Text>
+            <Ionicons name="arrow-forward" size={18} color="#fff" />
+          </LinearGradient>
+        </TouchableOpacity>
+
         {/* AI Badge */}
         <View style={styles.aiBadge}>
           <View style={styles.aiBadgeDot} />
@@ -202,6 +260,46 @@ export default function HomeScreen() {
             Google Gemini 3.1 · Hold Detection · V-Scale Grading
           </Text>
         </View>
+
+        {/* Track your progress Graph */}
+        {chartData && chartData.datasets[0].data.length > 0 && (
+          <View style={styles.chartContainer}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Track your progress!</Text>
+            </View>
+            <LineChart
+              data={chartData}
+              width={Dimensions.get('window').width - 40}
+              height={180}
+              yAxisLabel="V"
+              yAxisSuffix=""
+              fromZero={true}
+              chartConfig={{
+                backgroundColor: C.card,
+                backgroundGradientFrom: C.card,
+                backgroundGradientTo: C.card,
+                decimalPlaces: 0, 
+                color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(148, 163, 184, ${opacity})`,
+                style: {
+                  borderRadius: 16
+                },
+                propsForDots: {
+                  r: "4",
+                  strokeWidth: "2",
+                  stroke: C.bg
+                }
+              }}
+              bezier
+              style={{
+                marginVertical: 8,
+                borderRadius: 16,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            />
+          </View>
+        )}
 
         {/* Recent Climbs */}
         <View style={styles.sectionHeader}>
@@ -292,6 +390,7 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontSize: 17, fontWeight: '700', color: C.primary },
   seeAll: { fontSize: 13, color: C.accent },
+  chartContainer: { marginBottom: 24 },
   emptyCard: { backgroundColor: C.card, borderRadius: 16, padding: 32, alignItems: 'center', gap: 8, marginBottom: 24, borderWidth: 1, borderColor: C.border },
   emptyTitle: { fontSize: 16, fontWeight: '600', color: C.secondary },
   emptySubtitle: { fontSize: 13, color: C.muted, textAlign: 'center' },

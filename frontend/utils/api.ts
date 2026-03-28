@@ -15,6 +15,8 @@ const getLocalServerUrl = () => {
   return 'http://[IP_ADDRESS]';
 };
 
+// const BASE_URL = getLocalServerUrl();
+// const BASE_URL = 'http://10.40.141.116:8000'; //ASTA MERGE LA FACULTATE!!!!!!!!!!!!!!!!! NU STERGE!!!!!!!!!!!
 const BASE_URL = 'http://192.168.1.134:8000'; // IP-ul tău local (MAXIM STABIL)
 // const BASE_URL = 'https://climb-valy-v3-888.loca.lt'; // Tunel V3 (Ignoră-l dacă face figuri)
 

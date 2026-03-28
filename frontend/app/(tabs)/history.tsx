@@ -30,6 +30,7 @@ interface RouteRecord {
   analysis_id?: string;
 }
 
+
 export default function HistoryScreen() {
   const [routes, setRoutes] = useState<RouteRecord[]>([]);
   const [loading, setLoading] = useState(true);
