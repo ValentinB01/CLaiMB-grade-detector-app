@@ -6,6 +6,13 @@ import io
 import httpx # Asigură-te că ai rulat: pip install httpx
 from typing import List, Optional
 from PIL import Image as PILImage, ImageOps
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    print("✅ HEIC Support registered and active!")
+except ImportError:
+    print("⚠️ pillow-heif NOT found. iPhone (HEIC) images will fail.")
+    pass
 from models.schemas import HoldLocation
 
 logger = logging.getLogger(__name__)
@@ -73,6 +80,9 @@ class VisionService:
             # 2. Resize image to reduce upload size
             clean_base64 = self._resize_base64(clean_base64)
 
+            logger.info(f"📤 Sending to Roboflow (b64 len: {len(clean_base64)})")
+            print(f"📦 B64 Preview: {clean_base64[:50]}...")
+            
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(
                     self.url,
@@ -82,7 +92,10 @@ class VisionService:
                 )
 
             if resp.status_code != 200:
-                logger.error(f"⚠️ Roboflow Error {resp.status_code}: {resp.text}")
+                error_txt = resp.text
+                logger.error(f"⚠️ Roboflow Error {resp.status_code}: {error_txt}")
+                # Log critical info for the user to see in terminal
+                print(f"❌ ROBOFLOW ERROR: {resp.status_code} - {error_txt}")
                 return self._fallback_holds()
 
             data = resp.json()

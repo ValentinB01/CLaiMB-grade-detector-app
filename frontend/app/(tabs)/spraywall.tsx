@@ -13,6 +13,8 @@ import {
   ScrollView,
   Dimensions,
   LayoutChangeEvent,
+  Keyboard,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -20,7 +22,9 @@ import * as ImagePicker from 'expo-image-picker';
 import Svg, { Rect, Polygon, Ellipse, Text as SvgText } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
-import { detectHolds, gradeSelection } from '../../utils/api';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import { detectHolds, gradeSelection, askCoach, updateHistoryGym } from '../../utils/api';
 import { HoldLocation, SprayWallGradeResult } from '../../utils/store';
 import { ReactNativeZoomableView } from '@openspacelabs/react-native-zoomable-view';
 
@@ -83,6 +87,8 @@ export default function SprayWallScreen() {
   const isFocused = useIsFocused();
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
+  const router = useRouter();
+  const { selected_gym } = useLocalSearchParams<{ selected_gym?: string }>();
 
   // Phase management
   const [phase, setPhase] = useState<Phase>('capture');
@@ -105,6 +111,67 @@ export default function SprayWallScreen() {
 
   // Result phase state
   const [result, setResult] = useState<SprayWallGradeResult | null>(null);
+
+  // --- COACH CHAT STATE ---
+  const [chatVisible, setChatVisible] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{ role: 'user' | 'coach'; text: string }[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+
+  React.useEffect(() => {
+    if (selected_gym) {
+      if (phase === 'capture') {
+        setGymName(selected_gym);
+      } else if (phase === 'result' && result) {
+        setResult(prev => prev ? { ...prev, gym_name: selected_gym } : null);
+        if (result.analysis_id) {
+          updateHistoryGym(result.analysis_id, selected_gym).catch(e => console.error(e));
+        }
+      }
+    }
+  }, [selected_gym, phase, !!result]);
+
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || !result || isTyping) return;
+    const userText = chatInput.trim();
+    setChatInput('');
+    Keyboard.dismiss();
+
+    const newMessages = [...chatMessages, { role: 'user' as const, text: userText }];
+    setChatMessages(newMessages);
+    setIsTyping(true);
+
+    try {
+      const activeHolds = Array.from(selectedIndices).map(idx => allHolds[idx]).filter(Boolean);
+      const res = await askCoach({
+        image_base64: imageBase64,
+        holds: activeHolds,
+        prompt: userText,
+        history: chatMessages,
+        gym_name: result.gym_name,
+        wall_angle: result.wall_angle || 'vertical'
+      });
+      setChatMessages([...newMessages, { role: 'coach', text: res.reply }]);
+    } catch (e: any) {
+      setChatMessages([...newMessages, { role: 'coach', text: `Error: ${e.message}` }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const MarkdownText = ({ text, style }: { text: string; style?: any }) => {
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    return (
+      <Text style={style}>
+        {parts.map((part, i) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return <Text key={i} style={{ fontWeight: 'bold', color: '#fff' }}>{part.slice(2, -2)}</Text>;
+          }
+           return part;
+        })}
+      </Text>
+    );
+  };
 
   const getWallAngleString = () => {
     if (wallType === 'vertical') return 'Vertical (0 degrees)';
@@ -306,6 +373,12 @@ export default function SprayWallScreen() {
                   onChangeText={setGymName}
                   testID="spray-gym-input"
                 />
+                <TouchableOpacity onPress={() => router.push('/gyms-map?from=spraywall')} style={{ backgroundColor: C.bg, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="map" size={16} color={C.accent} />
+                  <Text style={{color: C.accent, fontSize: 13, fontWeight: '700'}}>
+                    {gymName ? `Selected: ${gymName.substring(0, 10)}...` : 'MAP'}
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <TouchableOpacity
@@ -450,6 +523,12 @@ export default function SprayWallScreen() {
               value={gymName}
               onChangeText={setGymName}
             />
+            <TouchableOpacity onPress={() => router.push('/gyms-map?from=spraywall')} style={{ backgroundColor: 'rgba(34,211,238,0.2)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+              <Ionicons name="map" size={14} color={C.accent} />
+              <Text style={{color: C.accent, fontSize: 13, fontWeight: '800'}}>
+                {gymName ? `Selected: ${gymName.substring(0, 8)}...` : 'MAP'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
 
@@ -653,23 +732,65 @@ export default function SprayWallScreen() {
             </View>
           ) : null}
 
-          {/* Meta info */}
-          <View style={styles.metaCard}>
-            <View style={styles.metaRow}>
-              <Ionicons name="location-outline" size={14} color={C.muted} />
-              <Text style={styles.metaText}>{result.gym_name}</Text>
-            </View>
-            <View style={styles.metaRow}>
-              <Ionicons name="speedometer-outline" size={14} color={C.muted} />
-              <Text style={styles.metaText}>{result.wall_angle}</Text>
+          {/* --- LOCATION SETTINGS --- */}
+          <View style={{ paddingHorizontal: 16, marginBottom: 16 }}>
+            <Text style={styles.confTitle}>GYM LOCATION & WALL</Text>
+            
+            <TouchableOpacity 
+              style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#334155', marginBottom: 8 }}
+              onPress={() => router.push('/gyms-map?from=spraywall')}
+            >
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(34,211,238,0.1)', alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
+                <Ionicons name="location" size={24} color={C.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: C.primary, fontSize: 16, fontWeight: '700' }}>
+                  {result.gym_name && result.gym_name !== 'Unknown Gym' ? result.gym_name : 'No gym selected'}
+                </Text>
+                <Text style={{ color: C.secondary, fontSize: 13, marginTop: 2 }}>Tap map to set location</Text>
+              </View>
+              <View style={{ backgroundColor: 'rgba(34,211,238,0.15)', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="map" size={18} color={C.accent} />
+                <Text style={{ color: C.accent, fontSize: 14, fontWeight: '800' }}>MAP</Text>
+              </View>
+            </TouchableOpacity>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#334155' }}>
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(167,139,250,0.1)', alignItems: 'center', justifyContent: 'center', marginRight: 16 }}>
+                <Ionicons name="speedometer" size={24} color="#a78bfa" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: C.primary, fontSize: 16, fontWeight: '700' }}>Wall Angle</Text>
+                <Text style={{ color: C.secondary, fontSize: 13, marginTop: 2 }}>{result.wall_angle}</Text>
+              </View>
             </View>
           </View>
+
+          {/* Buton Chat Coach */}
+          <TouchableOpacity style={styles.askCoachBtn} onPress={() => setChatVisible(true)}>
+            <LinearGradient
+              colors={['#8b5cf6', '#d946ef']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.askCoachGradient}
+            >
+              <Ionicons name="chatbubbles" size={20} color="#fff" />
+              <Text style={styles.askCoachBtnText}>ASK COACH FOR BETA</Text>
+            </LinearGradient>
+          </TouchableOpacity>
 
           {/* Actions */}
           <View style={styles.actions}>
             <TouchableOpacity style={styles.primaryAction} onPress={resetToCapture}>
-              <Ionicons name="camera" size={18} color="#09090b" />
-              <Text style={styles.primaryActionText}>NEW WALL</Text>
+              <LinearGradient
+                colors={['#22d3ee', '#6366f1']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.primaryActionGradient}
+              >
+                <Ionicons name="camera" size={18} color="#09090b" />
+                <Text style={styles.primaryActionText}>NEW WALL</Text>
+              </LinearGradient>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryAction} onPress={resetToSelection}>
               <Ionicons name="create-outline" size={18} color={C.primary} />
@@ -677,6 +798,58 @@ export default function SprayWallScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+
+      {/* --- CHAT MODAL --- */}
+      <Modal visible={chatVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBg}>
+          <View style={styles.chatContainer}>
+            <View style={styles.chatHeader}>
+              <Text style={styles.chatTitle}>CLaiMB Coach</Text>
+              <TouchableOpacity onPress={() => setChatVisible(false)} style={styles.closeBtn}>
+                <Ionicons name="close" size={24} color={C.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.chatScroll} contentContainerStyle={styles.chatContent}>
+              {chatMessages.length === 0 && (
+                <View style={styles.chatEmpty}>
+                  <Ionicons name="chatbubbles-outline" size={48} color={C.muted} />
+                  <Text style={styles.chatEmptyText}>Ask about hand placements, body tension, or sequence details.</Text>
+                </View>
+              )}
+              {chatMessages.map((msg, idx) => (
+                <View key={idx} style={[styles.msgBubble, msg.role === 'user' ? styles.msgUser : styles.msgCoach]}>
+                  {msg.role === 'coach' && <Ionicons name="sparkles" size={14} color="#fff" style={{ marginRight: 6 }} />}
+                  <MarkdownText 
+                    text={msg.text} 
+                    style={[styles.msgText, msg.role === 'user' ? { color: '#000' } : { color: '#f8fafc' }]} 
+                  />
+                </View>
+              ))}
+              {isTyping && (
+                <View style={[styles.msgBubble, styles.msgCoach, { width: 60, alignItems: 'center' }]}>
+                  <ActivityIndicator size="small" color="#fff" />
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.chatInputRow}>
+              <TextInput
+                style={styles.chatInput}
+                placeholder="Ask for beta..."
+                placeholderTextColor={C.muted}
+                value={chatInput}
+                onChangeText={setChatInput}
+                multiline
+                maxLength={400}
+              />
+              <TouchableOpacity style={[styles.chatSendBtn, !chatInput.trim() && { opacity: 0.5 }]} onPress={handleSendChat} disabled={!chatInput.trim() || isTyping}>
+                <Ionicons name="send" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
       </SafeAreaView>
     );
   }
@@ -795,8 +968,31 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   metaText: { fontSize: 13, color: C.secondary },
   actions: { flexDirection: 'row', gap: 10, marginHorizontal: 16 },
-  primaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.accent, borderRadius: 14, paddingVertical: 16 },
+  primaryAction: { flex: 1, borderRadius: 14, overflow: 'hidden' },
+  primaryActionGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
   primaryActionText: { fontSize: 13, fontWeight: '800', color: '#09090b' },
   secondaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.card, borderRadius: 14, paddingVertical: 16, borderWidth: 1, borderColor: C.border },
   secondaryActionText: { fontSize: 13, fontWeight: '700', color: C.primary },
+
+  askCoachBtn: { marginHorizontal: 16, marginBottom: 16, borderRadius: 14, overflow: 'hidden' },
+  askCoachGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
+  askCoachBtnText: { fontSize: 13, fontWeight: '800', color: '#fff', textTransform: 'uppercase', letterSpacing: 1 },
+
+  modalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  chatContainer: { backgroundColor: C.bg, height: '70%', borderTopLeftRadius: 24, borderTopRightRadius: 24, overflow: 'hidden' },
+  chatHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderColor: C.border },
+  chatTitle: { fontSize: 18, fontWeight: '700', color: C.primary },
+  closeBtn: { padding: 4 },
+  chatScroll: { flex: 1, backgroundColor: '#0b1120' },
+  chatContent: { padding: 16, gap: 12 },
+  chatEmpty: { alignItems: 'center', marginTop: 40 },
+  chatEmptyText: { color: C.muted, textAlign: 'center', marginTop: 12, marginHorizontal: 20 },
+  msgBubble: { padding: 12, borderRadius: 16, maxWidth: '85%' },
+  msgUser: { backgroundColor: '#e2e8f0', alignSelf: 'flex-end', borderBottomRightRadius: 4 },
+  msgCoach: { backgroundColor: C.card, alignSelf: 'flex-start', borderBottomLeftRadius: 4, flexDirection: 'row', alignItems: 'flex-start', borderWidth: 1, borderColor: C.border },
+  msgText: { fontSize: 15, lineHeight: 22 },
+  chatInputRow: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderColor: C.border, backgroundColor: C.bg, alignItems: 'flex-end', gap: 10 },
+  chatInput: { flex: 1, minHeight: 44, maxHeight: 100, backgroundColor: C.card, borderRadius: 22, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, color: C.primary, fontSize: 15, borderWidth: 1, borderColor: C.border },
+  chatSendBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#8b5cf6', alignItems: 'center', justifyContent: 'center' }
+
 });
