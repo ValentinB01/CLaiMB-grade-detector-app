@@ -1,0 +1,10 @@
+{
+  "build": {
+    "coach-prod": {
+      "env": { "APP_VARIANT": "coach" }
+    },
+    "community-prod": {
+      "env": { "APP_VARIANT": "community" }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.3
 aiosignal==1.4.0
@@ -133,3 +134,19 @@ wcwidth==0.6.0
 websockets==16.0
 yarl==1.22.0
 zipp==3.23.0
+=======
+fastapi
+uvicorn
+motor
+python-dotenv
+httpx
+pillow
+google-genai
+numpy
+scikit-learn
+ultralytics
+opencv-python-headless
+python-multipart
+celery
+redis
+>>>>>>> Stashed changes

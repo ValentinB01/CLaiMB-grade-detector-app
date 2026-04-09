@@ -14,6 +14,12 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { fetchStats, fetchHistory } from '../../utils/api';
 import { auth } from '../../firebaseConfig';
 import { signOut } from 'firebase/auth';
+<<<<<<< Updated upstream
+=======
+import DrawerMenu from '../../components/DrawerMenu';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+>>>>>>> Stashed changes
 
 const C = {
   bg: '#09090b',
@@ -44,7 +50,232 @@ interface RecentRoute {
   confidence: number;
 }
 
+interface GymDetail {
+  gym_id: string;
+  name: string;
+  primary_color?: string;
+  address?: string;
+}
+
+const DUMMY_NEWS = [
+  { id: '1', emoji: '🧗', text: 'S-au montat 5 trasee noi galbene pe panoul principal!', time: 'Acum 2 ore' },
+  { id: '2', emoji: '🏆', text: 'Competiție internă Sâmbătă, 12 Aprilie — înscrie-te acum!', time: 'Ieri' },
+];
+
+function CommunityFeedScreen() {
+  const router = useRouter();
+  const [gymId, setGymId] = useState<string | null>(null);
+  const [gym, setGym] = useState<GymDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadGym = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const storedId = await AsyncStorage.getItem('@current_gym_id');
+      setGymId(storedId);
+      if (storedId) {
+        const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/community/gyms/${storedId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: GymDetail = await res.json();
+        setGym(data);
+      }
+    } catch {
+      setError('Nu s-au putut încărca datele sălii.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(useCallback(() => { loadGym(); }, [loadGym]));
+
+  const handleLeaveGym = async () => {
+    await AsyncStorage.removeItem('@current_gym_id');
+    setGymId(null);
+    setGym(null);
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={commStyles.container}>
+        <ActivityIndicator color={C.accent} size="large" style={{ flex: 1 }} />
+      </SafeAreaView>
+    );
+  }
+
+  if (!gymId) {
+    return (
+      <SafeAreaView style={commStyles.container}>
+        <View style={commStyles.welcomeWrap}>
+          <Text style={commStyles.welcomeEmoji}>🧗</Text>
+          <Text style={commStyles.welcomeTitle}>Bun venit în CLaiMB!</Text>
+          <Text style={commStyles.welcomeSub}>
+            Scanează codul QR de la recepția sălii tale pentru a debloca feed-ul și clasamentele locale.
+          </Text>
+          <View style={commStyles.arrowHint}>
+            <Text style={commStyles.arrowHintText}>Apasă butonul central</Text>
+            <Ionicons name="arrow-down-circle" size={36} color={C.accent} style={{ marginTop: 10 }} />
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const accent = gym?.primary_color || C.accent;
+
+  return (
+    <SafeAreaView style={commStyles.container}>
+      <View style={commStyles.gymHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={commStyles.gymHeaderLabel}>📍 SALA CURENTĂ</Text>
+          <Text style={commStyles.gymHeaderName} numberOfLines={1}>{gym?.name ?? '...'}</Text>
+        </View>
+        <TouchableOpacity style={commStyles.leaveBtn} onPress={handleLeaveGym} activeOpacity={0.75}>
+          <Ionicons name="exit-outline" size={15} color="#f87171" />
+          <Text style={commStyles.leaveBtnText}>Leave</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={commStyles.scroll} showsVerticalScrollIndicator={false}>
+        {error && (
+          <View style={commStyles.errorBanner}>
+            <Text style={commStyles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        <LinearGradient
+          colors={[accent + '30', accent + '08']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[commStyles.wbCard, { borderColor: accent + '55' }]}
+        >
+          <Text style={commStyles.wbGreeting}>👋 Bun venit înapoi!</Text>
+          <Text style={[commStyles.wbGymName, { color: accent }]} numberOfLines={1}>
+            {gym?.name}
+          </Text>
+          {gym?.address && (
+            <Text style={commStyles.wbAddress} numberOfLines={1}>📍 {gym.address}</Text>
+          )}
+        </LinearGradient>
+
+        <View style={commStyles.sectionHeader}>
+          <Text style={commStyles.sectionTitle}>🗞 Noutăți din sală</Text>
+        </View>
+
+        {DUMMY_NEWS.map((item) => (
+          <View key={item.id} style={commStyles.newsCard}>
+            <Text style={commStyles.newsEmoji}>{item.emoji}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={commStyles.newsText}>{item.text}</Text>
+              <Text style={commStyles.newsTime}>{item.time}</Text>
+            </View>
+          </View>
+        ))}
+
+        <View style={commStyles.sectionHeader}>
+          <Text style={commStyles.sectionTitle}>⚡ Acțiuni rapide</Text>
+        </View>
+        <View style={commStyles.quickRow}>
+          <TouchableOpacity style={commStyles.quickCard} onPress={() => router.navigate('/arena' as any)} activeOpacity={0.8}>
+            <Ionicons name="trophy-outline" size={26} color="#fbbf24" />
+            <Text style={commStyles.quickLabel}>Clasament</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={commStyles.quickCard} onPress={() => router.navigate('/explore' as any)} activeOpacity={0.8}>
+            <Ionicons name="compass-outline" size={26} color={C.accent} />
+            <Text style={commStyles.quickLabel}>Explorează</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={commStyles.quickCard} onPress={() => router.navigate('/scan' as any)} activeOpacity={0.8}>
+            <Ionicons name="qr-code-outline" size={26} color="#a78bfa" />
+            <Text style={commStyles.quickLabel}>Check-in</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const commStyles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: C.bg },
+  scroll: { padding: 16, paddingBottom: 48 },
+  welcomeWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
+  welcomeEmoji: { fontSize: 72 },
+  welcomeTitle: { fontSize: 26, fontWeight: '900', color: C.primary, textAlign: 'center', letterSpacing: -0.5 },
+  welcomeSub: { fontSize: 15, color: C.secondary, textAlign: 'center', lineHeight: 23 },
+  arrowHint: { alignItems: 'center', marginTop: 16, gap: 4 },
+  arrowHintText: { color: C.accent, fontWeight: '700', fontSize: 14 },
+  gymHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: C.card,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  gymHeaderLabel: { color: C.muted, fontSize: 10, fontWeight: '700', letterSpacing: 1 },
+  gymHeaderName: { color: C.primary, fontSize: 18, fontWeight: '800', marginTop: 2 },
+  leaveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(248,113,113,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.3)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  leaveBtnText: { color: '#f87171', fontSize: 12, fontWeight: '700' },
+  errorBanner: {
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  errorText: { color: '#f87171', fontSize: 13, textAlign: 'center' },
+  wbCard: { borderRadius: 16, borderWidth: 1, padding: 20, marginBottom: 24 },
+  wbGreeting: { color: C.secondary, fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  wbGymName: { fontSize: 22, fontWeight: '900', letterSpacing: -0.5, marginBottom: 4 },
+  wbAddress: { color: C.secondary, fontSize: 13 },
+  sectionHeader: { marginBottom: 12, marginTop: 4 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: C.primary },
+  newsCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: C.card,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  newsEmoji: { fontSize: 22 },
+  newsText: { color: C.primary, fontSize: 14, fontWeight: '500', lineHeight: 20 },
+  newsTime: { color: C.muted, fontSize: 12, marginTop: 4 },
+  quickRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
+  quickCard: {
+    flex: 1,
+    backgroundColor: C.card,
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  quickLabel: { color: C.secondary, fontSize: 11, fontWeight: '600', textAlign: 'center' },
+});
+
 export default function HomeScreen() {
+  const variant = process.env.EXPO_PUBLIC_VARIANT || 'coach';
+  return variant === 'community' ? <CommunityFeedScreen /> : <CoachHomeScreen />;
+}
+
+function CoachHomeScreen() {
   const router = useRouter();
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<RecentRoute[]>([]);
