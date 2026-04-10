@@ -11,12 +11,7 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-<<<<<<< Updated upstream
-    // Asta "ascultă" în fundal dacă te-ai logat sau delogat
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-=======
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
->>>>>>> Stashed changes
       setUser(currentUser);
       
       if (currentUser) {

@@ -11,7 +11,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { BarcodeScanningResult } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: W } = Dimensions.get('window');
@@ -23,18 +23,27 @@ export default function ScanScreen() {
   const [scanned, setScanned] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      setScanned(false);
+      setSuccess(false);
+    }, [])
+  );
+
   const handleBarcodeScanned = useCallback(
     async ({ data }: BarcodeScanningResult) => {
       if (scanned) return;
+      setScanned(true);
 
       try {
         const parsed = JSON.parse(data);
         if (parsed.type !== 'gym_join' || !parsed.gym_id) {
-          Alert.alert('Cod invalid', 'Acesta nu este un cod QR valid pentru CLaiMB.');
+          Alert.alert('Cod invalid', 'Acesta nu este un cod QR valid pentru CLaiMB.', [
+            { text: 'Scanează din nou', onPress: () => setScanned(false) },
+          ]);
           return;
         }
 
-        setScanned(true);
         await AsyncStorage.setItem('@current_gym_id', parsed.gym_id);
         setSuccess(true);
 
@@ -42,7 +51,9 @@ export default function ScanScreen() {
           router.replace('/');
         }, 1500);
       } catch {
-        Alert.alert('Cod invalid', 'QR-ul scanat nu este recunoscut de aplicație.');
+        Alert.alert('Cod invalid', 'QR-ul scanat nu este recunoscut de aplicație.', [
+          { text: 'Scanează din nou', onPress: () => setScanned(false) },
+        ]);
       }
     },
     [scanned, router],

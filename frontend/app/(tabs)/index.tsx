@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,20 +6,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  RefreshControl,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { fetchStats, fetchHistory } from '../../utils/api';
 import { auth } from '../../firebaseConfig';
 import { signOut } from 'firebase/auth';
-<<<<<<< Updated upstream
-=======
-import DrawerMenu from '../../components/DrawerMenu';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
->>>>>>> Stashed changes
+import { LinearGradient } from 'expo-linear-gradient';
 
 const C = {
   bg: '#09090b',
@@ -57,15 +52,20 @@ interface GymDetail {
   address?: string;
 }
 
-const DUMMY_NEWS = [
-  { id: '1', emoji: '🧗', text: 'S-au montat 5 trasee noi galbene pe panoul principal!', time: 'Acum 2 ore' },
-  { id: '2', emoji: '🏆', text: 'Competiție internă Sâmbătă, 12 Aprilie — înscrie-te acum!', time: 'Ieri' },
-];
+interface GymNews {
+  id: string;
+  title: string;
+  content: string;
+  date: string;
+  emoji?: string;
+}
 
 function CommunityFeedScreen() {
   const router = useRouter();
   const [gymId, setGymId] = useState<string | null>(null);
   const [gym, setGym] = useState<GymDetail | null>(null);
+  const [gymNews, setGymNews] = useState<GymNews[]>([]);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -80,6 +80,18 @@ function CommunityFeedScreen() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: GymDetail = await res.json();
         setGym(data);
+
+        // Încarcă știrile sălii
+        setNewsLoading(true);
+        try {
+          const newsRes = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/community/gyms/${storedId}/news`);
+          if (newsRes.ok) {
+            const newsData: GymNews[] = await newsRes.json();
+            setGymNews(newsData);
+          }
+        } catch { /* știrile sunt opționale */ } finally {
+          setNewsLoading(false);
+        }
       }
     } catch {
       setError('Nu s-au putut încărca datele sălii.');
@@ -94,6 +106,7 @@ function CommunityFeedScreen() {
     await AsyncStorage.removeItem('@current_gym_id');
     setGymId(null);
     setGym(null);
+    setGymNews([]);
   };
 
   if (loading) {
@@ -163,15 +176,27 @@ function CommunityFeedScreen() {
           <Text style={commStyles.sectionTitle}>🗞 Noutăți din sală</Text>
         </View>
 
-        {DUMMY_NEWS.map((item) => (
-          <View key={item.id} style={commStyles.newsCard}>
-            <Text style={commStyles.newsEmoji}>{item.emoji}</Text>
+        {newsLoading ? (
+          <ActivityIndicator color={accent} style={{ marginVertical: 16 }} />
+        ) : gymNews.length === 0 ? (
+          <View style={commStyles.newsCard}>
+            <Text style={commStyles.newsEmoji}>📢</Text>
             <View style={{ flex: 1 }}>
-              <Text style={commStyles.newsText}>{item.text}</Text>
-              <Text style={commStyles.newsTime}>{item.time}</Text>
+              <Text style={commStyles.newsText}>Nicio noutate momentan.</Text>
             </View>
           </View>
-        ))}
+        ) : (
+          gymNews.map((item) => (
+            <View key={item.id} style={[commStyles.newsCard, { borderColor: accent + '40' }]}>
+              <Text style={commStyles.newsEmoji}>{item.emoji || '📢'}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[commStyles.newsTitle, { color: accent }]}>{item.title}</Text>
+                <Text style={commStyles.newsText}>{item.content}</Text>
+                <Text style={commStyles.newsTime}>{item.date}</Text>
+              </View>
+            </View>
+          ))
+        )}
 
         <View style={commStyles.sectionHeader}>
           <Text style={commStyles.sectionTitle}>⚡ Acțiuni rapide</Text>
@@ -254,6 +279,7 @@ const commStyles = StyleSheet.create({
     borderColor: C.border,
   },
   newsEmoji: { fontSize: 22 },
+  newsTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
   newsText: { color: C.primary, fontSize: 14, fontWeight: '500', lineHeight: 20 },
   newsTime: { color: C.muted, fontSize: 12, marginTop: 4 },
   quickRow: { flexDirection: 'row', gap: 10, marginBottom: 24 },
@@ -272,237 +298,323 @@ const commStyles = StyleSheet.create({
 
 export default function HomeScreen() {
   const variant = process.env.EXPO_PUBLIC_VARIANT || 'coach';
-  return variant === 'community' ? <CommunityFeedScreen /> : <CoachHomeScreen />;
+  return variant === 'community' ? <CommunityFeedScreen /> : <CoachDashboard />;
 }
 
-function CoachHomeScreen() {
+/* ── Coach palette extension ─────────────────────────────── */
+const K = {
+  bg: '#0d0d12',
+  card: '#18181b',
+  cardBorder: '#27272a',
+  primary: '#f0f0f5',
+  secondary: '#a1a1aa',
+  muted: '#52525b',
+  accent: '#a855f7',
+  accentDim: 'rgba(168,85,247,0.12)',
+  accentBorder: 'rgba(168,85,247,0.30)',
+  green: '#22c55e',
+  ctaRed: '#ef4444',
+};
+
+/* ── Helper: today's date formatted ──────────────────────── */
+const todayFormatted = () => {
+  const d = new Date();
+  return d.toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' });
+};
+
+/* ── CoachDashboard ──────────────────────────────────────── */
+function CoachDashboard() {
   const router = useRouter();
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [recent, setRecent] = useState<RecentRoute[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const userEmail = auth.currentUser?.email;
+  const userName = userEmail ? userEmail.split('@')[0] : null;
 
-  const loadData = useCallback(async () => {
-    try {
-      const [statsData, historyData] = await Promise.all([
-        fetchStats(),
-        fetchHistory(),
-      ]);
-      setStats(statsData);
-      setRecent((historyData.routes || []).slice(0, 3));
-    } catch {
-      setStats({ total_routes: 0, best_grade: null, grades: {} });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
-
-  const onRefresh = () => { setRefreshing(true); loadData(); };
-
-  const gradeColor = (grade: string) => {
-    const n = parseInt(grade.replace('V', ''));
-    if (n <= 2) return C.success;
-    if (n <= 5) return C.accent;
-    if (n <= 7) return C.warning;
-    return C.error;
-  };
-
-  const formatDate = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    } catch { return '—'; }
-  };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ActivityIndicator color={C.accent} size="large" style={{ flex: 1 }} />
-      </SafeAreaView>
-    );
-  }
+  // Mock progress data (will be replaced with real API data)
+  const efficiencyScore = 78;
 
   return (
-    <SafeAreaView style={styles.container} testID="home-screen">
+    <SafeAreaView style={coachStyles.container}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={coachStyles.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.accent} />}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>ClAImb AI Coach</Text>
-            <Text style={styles.numeUser}>
-              {auth.currentUser?.email || 'Guest Climber'}
+        {/* ── Section 1: Header & Greeting ────────────── */}
+        <View style={coachStyles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={coachStyles.greeting}>
+              Salutare{userName ? `, ${userName}` : ''}! 🧗‍♂️
+            </Text>
+            <Text style={coachStyles.dateLine}>
+              {todayFormatted()} — Gata pentru un nou antrenament?
             </Text>
           </View>
-          
-          {/* Partea dreaptă: Avatar + Buton Logout */}
+
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={styles.avatarWrap}>
-              <Text style={styles.avatarText}>
-                {auth.currentUser?.email 
-                  ? auth.currentUser.email.charAt(0).toUpperCase() 
-                  : 'G'}
+            <View style={coachStyles.avatar}>
+              <Text style={coachStyles.avatarLetter}>
+                {userEmail ? userEmail.charAt(0).toUpperCase() : 'G'}
               </Text>
             </View>
-            
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => signOut(auth)}
-              style={{ padding: 8, backgroundColor: C.card, borderRadius: 8, borderWidth: 1, borderColor: C.border }}
+              style={coachStyles.logoutBtn}
+              activeOpacity={0.75}
             >
-              <Ionicons name="log-out-outline" size={20} color={C.error} />
+              <Ionicons name="log-out-outline" size={20} color={K.ctaRed} />
             </TouchableOpacity>
           </View>
-
         </View>
 
-        {/* Stats Row */}
-        <View style={styles.statsRow}>
-          <StatCard
-            label="Total Routes"
-            value={String(stats?.total_routes ?? 0)}
-            icon="analytics"
-            color={C.accent}
-          />
-          <StatCard
-            label="Best Grade"
-            value={stats?.best_grade ?? '—'}
-            icon="trophy"
-            color={C.warning}
-          />
-          <StatCard
-            label="AI Model"
-            value="4-6"
-            icon="flash"
-            color={C.success}
-          />
-        </View>
-
-        {/* CTA */}
-        <TouchableOpacity
-          testID="scan-route-btn"
-          style={styles.ctaBtn}
-          onPress={() => router.push('/(tabs)/camera')}
-          activeOpacity={0.85}
+        {/* ── Section 2: Daily AI Insight ─────────────── */}
+        <LinearGradient
+          colors={['rgba(168,85,247,0.18)', 'rgba(168,85,247,0.04)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={coachStyles.insightCard}
         >
-          <Ionicons name="camera" size={22} color="#09090b" />
-          <Text style={styles.ctaBtnText}>SCAN A ROUTE</Text>
-          <Ionicons name="arrow-forward" size={18} color="#09090b" />
-        </TouchableOpacity>
+          <View style={coachStyles.insightHeader}>
+            <Ionicons name="sparkles" size={20} color={K.accent} />
+            <Text style={coachStyles.insightBadge}>AI Insight</Text>
+          </View>
+          <Text style={coachStyles.insightText}>
+            La ultima sesiune ai avut tendința să tragi prea mult din bicepși.
+            Azi, concentrează-te pe a împinge mai mult din picioare pe prizele
+            mici.
+          </Text>
+        </LinearGradient>
 
-        {/* AI Badge */}
-        <View style={styles.aiBadge}>
-          <View style={styles.aiBadgeDot} />
-          <Text style={styles.aiBadgeText}>
-            Google Gemini 3.1 · Hold Detection · V-Scale Grading
+        {/* ── Section 3: Progress Summary ────────────── */}
+        <View style={coachStyles.progressCard}>
+          <View style={coachStyles.progressHeader}>
+            <Ionicons name="analytics-outline" size={20} color={K.accent} />
+            <Text style={coachStyles.progressTitle}>Eficiența Medie a Tehnicii</Text>
+          </View>
+
+          <Text style={coachStyles.scoreBig}>{efficiencyScore}%</Text>
+
+          <View style={coachStyles.barTrack}>
+            <View
+              style={[
+                coachStyles.barFill,
+                { width: `${efficiencyScore}%` },
+              ]}
+            />
+          </View>
+
+          <Text style={coachStyles.progressHint}>
+            Bazat pe ultimele tale sesiuni de analiză video.
           </Text>
         </View>
 
-        {/* Recent Climbs */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Recent Climbs</Text>
-          {recent.length > 0 && (
-            <TouchableOpacity onPress={() => router.push('/(tabs)/history')} testID="see-all-btn">
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        {/* ── Section 4: Quick Action CTA ────────────── */}
+        <TouchableOpacity
+          style={coachStyles.ctaBtn}
+          onPress={() => router.push('/(tabs)/camera')}
+          activeOpacity={0.85}
+        >
+          <Text style={coachStyles.ctaEmoji}>🔴</Text>
+          <Text style={coachStyles.ctaText}>Lansează Analiza Video</Text>
+          <Ionicons name="arrow-forward" size={18} color="#fff" />
+        </TouchableOpacity>
 
-        {recent.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Ionicons name="camera-outline" size={36} color={C.muted} />
-            <Text style={styles.emptyTitle}>No climbs yet</Text>
-            <Text style={styles.emptySubtitle}>Tap "Scan a Route" to analyze your first climb</Text>
-          </View>
-        ) : (
-          recent.map((route) => (
-            <View key={route.id} style={styles.routeCard} testID={`recent-route-${route.id}`}>
-              <View style={styles.routeLeft}>
-                <View style={[styles.gradeBadge, { backgroundColor: gradeColor(route.grade) + '22', borderColor: gradeColor(route.grade) }]}>
-                  <Text style={[styles.gradeText, { color: gradeColor(route.grade) }]}>{route.grade}</Text>
-                </View>
-                <View style={styles.routeInfo}>
-                  <Text style={styles.gymName} numberOfLines={1}>{route.gym_name}</Text>
-                  <Text style={styles.routeMeta}>
-                    {route.holds_count} holds · {Math.round(route.confidence * 100)}% confidence
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.routeDate}>{formatDate(route.analyzed_at)}</Text>
-            </View>
-          ))
-        )}
-
-        {/* How it works */}
-        <View style={styles.howCard}>
-          <Text style={styles.howTitle}>How it works</Text>
-          {[
-            { icon: 'camera', text: 'Photograph the climbing wall' },
-            { icon: 'eye', text: 'AI detects holds & maps positions' },
-            { icon: 'star', text: 'Receive V-scale grade + coach tips' },
-          ].map((item, i) => (
-            <View key={i} style={styles.howRow}>
-              <View style={styles.howIconWrap}>
-                <Ionicons name={item.icon as any} size={16} color={C.accent} />
-              </View>
-              <Text style={styles.howText}>{item.text}</Text>
-            </View>
-          ))}
+        {/* ── AI Model Badge ─────────────────────────── */}
+        <View style={coachStyles.aiBadge}>
+          <View style={coachStyles.aiBadgeDot} />
+          <Text style={coachStyles.aiBadgeText}>
+            YOLO11 Pose · Gemini AI · Real-time Feedback
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function StatCard({ label, value, icon, color }: { label: string; value: string; icon: any; color: string }) {
-  return (
-    <View style={[styles.statCard, { borderColor: color + '33' }]}>
-      <Ionicons name={icon} size={18} color={color} />
-      <Text style={[styles.statValue, { color }]}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
+/* ── Coach Styles ─────────────────────────────────────────── */
+const coachStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: K.bg,
+  },
+  scroll: {
+    padding: 20,
+    paddingBottom: 48,
+  },
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg },
-  scroll: { padding: 20, paddingBottom: 40 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  greeting: { fontSize: 22, fontWeight: '800', color: C.primary, letterSpacing: -0.5 },
-  numeUser: {fontSize: 14, color: C.secondary, marginTop:4},
-  subGreeting: { fontSize: 14, color: C.secondary, marginTop: 2 },
-  avatarWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.accent + '22', borderWidth: 2, borderColor: C.accent, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 18, fontWeight: '700', color: C.accent },
-  statsRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
-  statCard: { flex: 1, backgroundColor: C.card, borderRadius: 12, padding: 12, alignItems: 'center', gap: 6, borderWidth: 1 },
-  statValue: { fontSize: 20, fontWeight: '800' },
-  statLabel: { fontSize: 10, color: C.secondary, textAlign: 'center' },
-  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accent, borderRadius: 9999, paddingVertical: 16, marginBottom: 12 },
-  ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#09090b', letterSpacing: 1 },
-  aiBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.card, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'center', marginBottom: 28 },
-  aiBadgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.success },
-  aiBadgeText: { fontSize: 11, color: C.secondary },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: C.primary },
-  seeAll: { fontSize: 13, color: C.accent },
-  emptyCard: { backgroundColor: C.card, borderRadius: 16, padding: 32, alignItems: 'center', gap: 8, marginBottom: 24 },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: C.secondary },
-  emptySubtitle: { fontSize: 13, color: C.muted, textAlign: 'center' },
-  routeCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.card, borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: C.border },
-  routeLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  gradeBadge: { width: 52, height: 52, borderRadius: 10, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  gradeText: { fontSize: 16, fontWeight: '800' },
-  routeInfo: { flex: 1 },
-  gymName: { fontSize: 14, fontWeight: '600', color: C.primary },
-  routeMeta: { fontSize: 12, color: C.secondary, marginTop: 2 },
-  routeDate: { fontSize: 12, color: C.muted },
-  howCard: { backgroundColor: C.card, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: C.border },
-  howTitle: { fontSize: 14, fontWeight: '700', color: C.primary, marginBottom: 14 },
-  howRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
-  howIconWrap: { width: 30, height: 30, borderRadius: 8, backgroundColor: C.accent + '15', alignItems: 'center', justifyContent: 'center' },
-  howText: { fontSize: 13, color: C.secondary, flex: 1 },
+  /* Header */
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  greeting: {
+    color: K.primary,
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+    marginBottom: 4,
+  },
+  dateLine: {
+    color: K.secondary,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: K.accentDim,
+    borderWidth: 2,
+    borderColor: K.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarLetter: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: K.accent,
+  },
+  logoutBtn: {
+    padding: 8,
+    backgroundColor: K.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: K.cardBorder,
+  },
+
+  /* AI Insight Card */
+  insightCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: K.accentBorder,
+    padding: 20,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#a855f7',
+        shadowOpacity: 0.15,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 6 },
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  insightHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  insightBadge: {
+    color: K.accent,
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  insightText: {
+    color: K.primary,
+    fontSize: 14,
+    lineHeight: 22,
+    fontStyle: 'italic',
+  },
+
+  /* Progress Card */
+  progressCard: {
+    backgroundColor: K.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: K.cardBorder,
+    padding: 20,
+    marginBottom: 16,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  progressTitle: {
+    color: K.secondary,
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  scoreBig: {
+    color: K.green,
+    fontSize: 52,
+    fontWeight: '900',
+    textAlign: 'center',
+    lineHeight: 58,
+    marginBottom: 14,
+  },
+  barTrack: {
+    width: '100%',
+    height: 10,
+    backgroundColor: K.cardBorder,
+    borderRadius: 5,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  barFill: {
+    height: '100%',
+    borderRadius: 5,
+    backgroundColor: K.green,
+  },
+  progressHint: {
+    color: K.muted,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+
+  /* CTA Button */
+  ctaBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: K.accent,
+    borderRadius: 9999,
+    paddingVertical: 18,
+    marginBottom: 14,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#a855f7',
+        shadowOpacity: 0.4,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 6 },
+      },
+      android: { elevation: 10 },
+    }),
+  },
+  ctaEmoji: {
+    fontSize: 18,
+  },
+  ctaText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+
+  /* AI Badge */
+  aiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: K.card,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    alignSelf: 'center',
+  },
+  aiBadgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: K.green,
+  },
+  aiBadgeText: {
+    fontSize: 11,
+    color: K.secondary,
+  },
 });

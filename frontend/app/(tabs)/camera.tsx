@@ -4,392 +4,677 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  TextInput,
   ActivityIndicator,
   Alert,
   Platform,
-  KeyboardAvoidingView,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { analyzeRoute } from '../../utils/api';
-import { setPendingResult } from '../../utils/store';
+import { LinearGradient } from 'expo-linear-gradient';
+import { analyzePose, PoseAnalysisResult } from '../../utils/api';
 
 const C = {
-  bg: '#09090b',
+  bg: '#0d0d12',
   card: '#18181b',
-  border: '#27272a',
-  primary: '#fafafa',
+  cardBorder: '#27272a',
+  primary: '#f0f0f5',
   secondary: '#a1a1aa',
   muted: '#52525b',
-  accent: '#22d3ee',
+  accent: '#a855f7',
+  green: '#22c55e',
+  orange: '#f97316',
+  red: '#ef4444',
+  recRed: '#ef4444',
 };
 
-// Definim opțiunile de unghiuri pentru fiecare tip
-const WALL_TYPES = [
-  { label: 'Inclined', value: 'inclined' },
-  { label: 'Vertical', value: 'vertical' },
-  { label: 'Overhang', value: 'overhang' }
-];
-
-const OVERHANG_DEGREES = [5, 10, 15, 20, 30, 40, 45, 50, 60];
-const SLAB_DEGREES = [5, 10, 15, 20, 25, 30];
+type AppState = 'idle' | 'camera' | 'analyzing' | 'result';
 
 export default function CameraScreen() {
-  const router = useRouter();
   const cameraRef = useRef<CameraView>(null);
-  const [permission, requestPermission] = useCameraPermissions();
-  const [facing, setFacing] = useState<'back' | 'front'>('back');
-  const [flash, setFlash] = useState<'off' | 'on'>('off');
-  const [gymName, setGymName] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  // State-uri pentru unghiul dinamic
-  const [wallType, setWallType] = useState<'inclined' | 'vertical' | 'overhang'>('vertical');
-  const [wallDegree, setWallDegree] = useState<number>(0);
+  const [camPerm, requestCamPerm] = useCameraPermissions();
+  const [micPerm, requestMicPerm] = useMicrophonePermissions();
 
-  // Funcție care construiește string-ul final pentru Gemini
-  const getWallAngleString = () => {
-    if (wallType === 'vertical') return "Vertical (0 degrees)";
-    if (wallType === 'inclined') return `Inclined (leaning back ${wallDegree} degrees)`;
-    return `${wallDegree}-degree Overhang`;
+  const [appState, setAppState] = useState<AppState>('idle');
+  const [recording, setRecording] = useState(false);
+  const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [result, setResult] = useState<PoseAnalysisResult | null>(null);
+
+  const scoreColor = (score: number) => {
+    if (score >= 80) return C.green;
+    if (score >= 50) return C.orange;
+    return C.red;
   };
 
-  const handleCapture = async () => {
-    if (loading) return;
+  // ── Permissions ──
+  const ensurePermissions = async (): Promise<boolean> => {
+    let cam = camPerm;
+    let mic = micPerm;
 
-    if (Platform.OS === 'web') {
-      await pickFromGallery();
-      return;
+    if (!cam?.granted) {
+      cam = await requestCamPerm();
+    }
+    if (!mic?.granted) {
+      mic = await requestMicPerm();
     }
 
-    if (!permission?.granted) {
-      Alert.alert('Camera permission required', 'Please grant camera access to scan routes.');
-      return;
+    if (!cam?.granted) {
+      Alert.alert('Permisiuni necesare', 'Acorda acces la camera pentru a filma.');
+      return false;
     }
+    // Microphone is optional — video can still record without audio
+    return true;
+  };
 
-    try {
-      setLoading(true);
-      const photo = await cameraRef.current?.takePictureAsync({
-        quality: 0.6,
-        base64: true,
-        exif: false,
-      });
-      if (photo?.base64) {
-        await submitAnalysis(photo.base64);
+  // ── Open Camera ──
+  const openCamera = async () => {
+    const ok = await ensurePermissions();
+    if (ok) setAppState('camera');
+  };
+
+  // ── Record toggle ──
+  const toggleRecording = async () => {
+    if (!cameraRef.current) return;
+
+    if (recording) {
+      cameraRef.current.stopRecording();
+      // onRecordingComplete below handles the URI
+    } else {
+      setRecording(true);
+      try {
+        const video = await cameraRef.current.recordAsync();
+        if (video?.uri) {
+          setVideoUri(video.uri);
+          setAppState('analyzing');
+          await submitVideo(video.uri, 'live_recording.mp4');
+        }
+      } catch (err: any) {
+        Alert.alert('Eroare filmare', err?.message || String(err));
+        setAppState('idle');
+      } finally {
+        setRecording(false);
       }
-    } catch (err) {
-      Alert.alert('Capture failed', String(err));
-      setLoading(false);
     }
   };
 
+  // ── Gallery picker ──
   const pickFromGallery = async () => {
     try {
-      setLoading(true);
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 0.6,
-        base64: true,
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['videos'],
+        quality: 0.7,
         allowsEditing: false,
       });
-      if (!result.canceled && result.assets[0].base64) {
-        await submitAnalysis(result.assets[0].base64);
-      } else {
-        setLoading(false);
-      }
-    } catch (err) {
-      Alert.alert('Gallery error', String(err));
-      setLoading(false);
+
+      if (pickerResult.canceled || !pickerResult.assets?.[0]) return;
+
+      const asset = pickerResult.assets[0];
+      const uri = asset.uri;
+      const fileName = asset.fileName || uri.split('/').pop() || 'climbing_video.mp4';
+
+      setVideoUri(uri);
+      setAppState('analyzing');
+      await submitVideo(uri, fileName);
+    } catch (err: any) {
+      Alert.alert('Eroare galerie', err?.message || String(err));
+      setAppState('idle');
     }
   };
 
-  const submitAnalysis = async (base64: string) => {
+  // ── Submit to backend ──
+  const submitVideo = async (uri: string, fileName: string) => {
     try {
-      const finalAngle = getWallAngleString();
-      const result = await analyzeRoute({
-        image_base64: base64,
-        gym_name: gymName.trim() || 'Unknown Gym',
-        wall_angle: finalAngle, // Trimitem textul curat către backend
-      });
-      setPendingResult({ ...result, image_base64: base64 });
-      router.push('/result');
-    } catch (err) {
-      Alert.alert('Analysis failed', String(err));
-    } finally {
-      setLoading(false);
+      const data = await analyzePose(uri, fileName);
+      setResult(data);
+      setAppState('result');
+    } catch (err: any) {
+      Alert.alert('Analiza esuata', err?.message || String(err));
+      setAppState('idle');
     }
   };
 
-  // Funcție de schimbare a tipului de perete și resetare a gradelor default
-  const handleTypeChange = (type: 'inclined' | 'vertical' | 'overhang') => {
-    setWallType(type);
-    if (type === 'vertical') setWallDegree(0);
-    else if (type === 'inclined') setWallDegree(10);
-    else setWallDegree(30);
+  // ── Reset ──
+  const resetStudio = () => {
+    setAppState('idle');
+    setResult(null);
+    setVideoUri(null);
+    setRecording(false);
   };
 
-  // --- WEB: no CameraView ---
-  if (Platform.OS === 'web') {
+  // ═══════════════════════════════════════════════════════════
+  //  STATE: CAMERA (full-screen video recording)
+  // ═══════════════════════════════════════════════════════════
+  if (appState === 'camera') {
     return (
-      <SafeAreaView style={styles.container} testID="camera-screen-web">
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-          <View style={styles.webContainer}>
-            <View style={styles.webHero}>
-              <View style={styles.webIconRing}>
-                <Ionicons name="camera" size={56} color={C.accent} />
-              </View>
-              <Text style={styles.webTitle}>Scan a Route</Text>
-              <Text style={styles.webSub}>Upload a climbing wall photo for AI analysis</Text>
-            </View>
+      <View style={styles.container}>
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          mode="video"
+        />
 
-            {/* Selector Unghi Web */}
-            <View style={styles.angleContainerWeb}>
-              <Text style={styles.angleTitle}>Wall Angle:</Text>
-              <View style={styles.angleButtons}>
-                {WALL_TYPES.map((t) => (
-                  <TouchableOpacity
-                    key={t.value}
-                    style={[styles.angleBtn, wallType === t.value && styles.angleBtnActive]}
-                    onPress={() => handleTypeChange(t.value as any)}
-                  >
-                    <Text style={[styles.angleBtnText, wallType === t.value && styles.angleBtnTextActive]}>
-                      {t.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              
-              {/* Sub-meniu grade Web */}
-              {wallType !== 'vertical' && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.degreeScrollWeb} contentContainerStyle={{ gap: 8 }}>
-                  {(wallType === 'overhang' ? OVERHANG_DEGREES : SLAB_DEGREES).map(deg => (
-                    <TouchableOpacity 
-                      key={deg} 
-                      style={[styles.degBtn, wallDegree === deg && styles.degBtnActive]}
-                      onPress={() => setWallDegree(deg)}
-                    >
-                      <Text style={[styles.degBtnText, wallDegree === deg && styles.degBtnTextActive]}>{deg}°</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              )}
-            </View>
-
-            <View style={styles.gymInputWrap}>
-              <Ionicons name="location-outline" size={16} color={C.muted} />
-              <TextInput
-                style={styles.gymInput}
-                placeholder="Gym name (optional)"
-                placeholderTextColor={C.muted}
-                value={gymName}
-                onChangeText={setGymName}
-                testID="gym-name-input"
-              />
-            </View>
-
-            <TouchableOpacity
-              testID="pick-image-btn"
-              style={styles.ctaBtn}
-              onPress={pickFromGallery}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#09090b" />
-              ) : (
-                <>
-                  <Ionicons name="images" size={20} color="#09090b" />
-                  <Text style={styles.ctaBtnText}>CHOOSE PHOTO</Text>
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
-
-  // --- Native: Full CameraView ---
-  if (!permission) {
-    return <View style={styles.container}><ActivityIndicator color={C.accent} /></View>;
-  }
-
-  if (!permission.granted) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.permissionContainer}>
-          <Ionicons name="camera-outline" size={72} color={C.accent} />
-          <Text style={styles.permTitle}>Camera Access Needed</Text>
-          <TouchableOpacity style={styles.ctaBtn} onPress={requestPermission}>
-            <Text style={styles.ctaBtnText}>GRANT ACCESS</Text>
+        {/* Close button */}
+        <SafeAreaView style={styles.cameraTopBar}>
+          <TouchableOpacity
+            style={styles.closeBtn}
+            onPress={() => {
+              if (recording) cameraRef.current?.stopRecording();
+              setRecording(false);
+              setAppState('idle');
+            }}
+          >
+            <Ionicons name="close" size={26} color="#fff" />
           </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+        </SafeAreaView>
 
-  return (
-    <View style={styles.container} testID="camera-screen-native">
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={facing} flash={flash} />
-
-      {/* Top controls */}
-      <SafeAreaView style={styles.topBar}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setFlash(f => (f === 'off' ? 'on' : 'off'))}>
-          <Ionicons name={flash === 'on' ? 'flash' : 'flash-off'} size={22} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setFacing(f => (f === 'back' ? 'front' : 'back'))}>
-          <Ionicons name="camera-reverse" size={22} color="#fff" />
-        </TouchableOpacity>
-      </SafeAreaView>
-
-      <View style={styles.instruction} pointerEvents="none">
-        <Text style={styles.instructionText}>Align the climbing wall in frame</Text>
-      </View>
-
-      <View style={styles.frame} pointerEvents="none">
-        {['tl', 'tr', 'bl', 'br'].map((corner) => (
-          <View
-            key={corner}
-            style={[
-              styles.corner,
-              corner.includes('t') ? styles.cornerTop : styles.cornerBottom,
-              corner.includes('l') ? styles.cornerLeft : styles.cornerRight,
-            ]}
-          />
-        ))}
-      </View>
-
-      {/* Selector de Unghi Plutitor */}
-      <View style={styles.angleContainerNative}>
-        <View style={styles.angleButtons}>
-          {WALL_TYPES.map((t) => (
-            <TouchableOpacity
-              key={t.value}
-              style={[styles.angleBtnNative, wallType === t.value && styles.angleBtnActiveNative]}
-              onPress={() => handleTypeChange(t.value as any)}
-            >
-              <Text style={[styles.angleBtnTextNative, wallType === t.value && styles.angleBtnTextActive]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        
-        {/* Sub-meniul orizontal cu grade (doar pe Native) */}
-        {wallType !== 'vertical' && (
-          <View style={styles.degreeWrapperNative}>
-             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20 }}>
-              {(wallType === 'overhang' ? OVERHANG_DEGREES : SLAB_DEGREES).map(deg => (
-                <TouchableOpacity 
-                  key={deg} 
-                  style={[styles.degBtnNative, wallDegree === deg && styles.degBtnActiveNative]}
-                  onPress={() => setWallDegree(deg)}
-                >
-                  <Text style={[styles.degBtnTextNative, wallDegree === deg && styles.degBtnTextActiveNative]}>{deg}°</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+        {/* Recording indicator */}
+        {recording && (
+          <View style={styles.recBadge}>
+            <View style={styles.recDot} />
+            <Text style={styles.recText}>REC</Text>
           </View>
         )}
-      </View>
 
-      {/* Bottom controls */}
-      <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.galleryBtn} onPress={pickFromGallery} disabled={loading}>
-          <Ionicons name="images-outline" size={26} color="#fff" />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.shutter, loading && styles.shutterDisabled]} onPress={handleCapture} disabled={loading}>
-          {loading ? <ActivityIndicator color="#09090b" size="large" /> : <View style={styles.shutterInner} />}
-        </TouchableOpacity>
-
-        <View style={{ width: 56 }} />
-      </View>
-
-      {/* Gym name input */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.gymBar}>
-          <Ionicons name="location-outline" size={14} color={C.muted} />
-          <TextInput
-            style={styles.gymInputNative}
-            placeholder="Gym name"
-            placeholderTextColor={C.muted}
-            value={gymName}
-            onChangeText={setGymName}
-          />
+        {/* Instruction */}
+        <View style={styles.cameraInstruction} pointerEvents="none">
+          <Text style={styles.cameraInstructionText}>
+            {recording ? 'Filmeaza-ti urcarea. Apasa din nou pentru a opri.' : 'Apasa butonul rosu pentru a incepe filmarea'}
+          </Text>
         </View>
-      </KeyboardAvoidingView>
 
-      {loading && (
-        <View style={styles.loadingOverlay} pointerEvents="none">
-          <ActivityIndicator color={C.accent} size="large" />
-          <Text style={styles.loadingText}>Coach AI is analyzing…</Text>
+        {/* Record button */}
+        <View style={styles.cameraBottomBar}>
+          <TouchableOpacity
+            style={[styles.recordBtn, recording && styles.recordBtnActive]}
+            onPress={toggleRecording}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.recordInner, recording && styles.recordInnerActive]} />
+          </TouchableOpacity>
         </View>
-      )}
-    </View>
+      </View>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  STATE: ANALYZING
+  // ═══════════════════════════════════════════════════════════
+  if (appState === 'analyzing') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.analyzingWrap}>
+          <View style={styles.pulseRing}>
+            <Ionicons name="body-outline" size={48} color={C.accent} />
+          </View>
+          <Text style={styles.analyzingTitle}>
+            AI Coach proceseaza miscarile tale...
+          </Text>
+          <Text style={styles.analyzingSub}>
+            Calculam unghiurile bratelor cu YOLO11 Pose.{'\n'}
+            Acest lucru poate dura cateva momente.
+          </Text>
+          <ActivityIndicator color={C.accent} size="large" style={{ marginTop: 24 }} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  STATE: RESULT
+  // ═══════════════════════════════════════════════════════════
+  if (appState === 'result' && result) {
+    const score = result.analysis.efficiency_score;
+    const color = scoreColor(score);
+
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView
+          contentContainerStyle={styles.resultScroll}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header */}
+          <View style={styles.resultHeader}>
+            <Ionicons name="analytics-outline" size={28} color={C.accent} />
+            <Text style={styles.resultHeaderTitle}>Rezultat Analiza</Text>
+          </View>
+
+          {/* AI Coach Card */}
+          <View style={styles.coachCard}>
+            <View style={styles.coachCardHeader}>
+              <Ionicons name="sparkles" size={20} color={C.accent} />
+              <Text style={styles.coachCardTitle}>AI Coach Feedback</Text>
+            </View>
+
+            {/* Efficiency Score */}
+            <View style={styles.scoreSection}>
+              <Text style={styles.scoreLabel}>Eficienta Bratelor</Text>
+              <Text style={[styles.scoreBig, { color }]}>{score}%</Text>
+
+              {/* Progress Bar */}
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: `${score}%`, backgroundColor: color },
+                  ]}
+                />
+              </View>
+
+              <View style={styles.scoreMetaRow}>
+                <Text style={styles.scoreMeta}>
+                  {result.analysis.frames_with_straight_arms} / {result.analysis.total_active_frames} cadre eficiente
+                </Text>
+              </View>
+            </View>
+
+            {/* Divider */}
+            <View style={styles.divider} />
+
+            {/* Feedback Text */}
+            <View style={styles.feedbackSection}>
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.secondary} />
+              <Text style={styles.feedbackText}>{result.analysis.feedback}</Text>
+            </View>
+          </View>
+
+          {/* Video Metadata Card */}
+          <View style={styles.metaCard}>
+            <Text style={styles.metaCardTitle}>Detalii Video</Text>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Rezolutie</Text>
+              <Text style={styles.metaValue}>
+                {result.metadata.width} x {result.metadata.height}
+              </Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>FPS procesat</Text>
+              <Text style={styles.metaValue}>{result.metadata.fps.toFixed(1)}</Text>
+            </View>
+            <View style={styles.metaRow}>
+              <Text style={styles.metaLabel}>Cadre analizate</Text>
+              <Text style={styles.metaValue}>{result.metadata.total_frames}</Text>
+            </View>
+          </View>
+
+          {/* Finish / New Analysis */}
+          <TouchableOpacity style={styles.finishBtn} onPress={resetStudio}>
+            <Ionicons name="refresh" size={20} color="#0d0d12" />
+            <Text style={styles.finishBtnText}>Analizeaza alta urcare</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  STATE: IDLE (home of the studio)
+  // ═══════════════════════════════════════════════════════════
+  return (
+    <SafeAreaView style={styles.container} testID="coaching-studio">
+      <View style={styles.idleWrap}>
+        {/* Hero */}
+        <View style={styles.heroIcon}>
+          <LinearGradient
+            colors={['rgba(168,85,247,0.20)', 'rgba(57,255,20,0.10)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroGradient}
+          >
+            <Ionicons name="videocam" size={52} color={C.accent} />
+          </LinearGradient>
+        </View>
+
+        <Text style={styles.idleTitle}>Analizeaza o Urcare</Text>
+        <Text style={styles.idleSub}>
+          Filmeaza live sau incarca un clip din galerie.{'\n'}
+          AI Coach-ul va analiza tehnica ta de escalada.
+        </Text>
+
+        {/* CTA Buttons */}
+        <View style={styles.ctaGroup}>
+          {/* Live Camera */}
+          <TouchableOpacity
+            style={styles.ctaCard}
+            onPress={openCamera}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={['#ef4444', '#dc2626']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.ctaIconWrap}
+            >
+              <Ionicons name="radio-button-on" size={28} color="#fff" />
+            </LinearGradient>
+            <View style={styles.ctaTextWrap}>
+              <Text style={styles.ctaTitle}>Deschide Camera</Text>
+              <Text style={styles.ctaSub}>Filmare Live</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={C.muted} />
+          </TouchableOpacity>
+
+          {/* Gallery */}
+          <TouchableOpacity
+            style={styles.ctaCard}
+            onPress={pickFromGallery}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={[C.accent, '#7c3aed']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.ctaIconWrap}
+            >
+              <Ionicons name="folder-open" size={26} color="#fff" />
+            </LinearGradient>
+            <View style={styles.ctaTextWrap}>
+              <Text style={styles.ctaTitle}>Incarca din Galerie</Text>
+              <Text style={styles.ctaSub}>Selecteaza un video existent</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={C.muted} />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 }
 
+// ═══════════════════════════════════════════════════════════
+//  STYLES
+// ═══════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  webContainer: { flex: 1, padding: 24, alignItems: 'center', justifyContent: 'center', gap: 24 },
-  webHero: { alignItems: 'center', gap: 12 },
-  webIconRing: { width: 120, height: 120, borderRadius: 60, backgroundColor: 'rgba(34,211,238,0.1)', borderWidth: 2, borderColor: C.accent, alignItems: 'center', justifyContent: 'center' },
-  webTitle: { fontSize: 26, fontWeight: '800', color: C.primary },
-  webSub: { fontSize: 14, color: C.secondary, textAlign: 'center' },
-  gymInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: C.card, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: C.border, width: '100%', maxWidth: 400 },
-  gymInput: { flex: 1, color: C.primary, fontSize: 15 },
-  ctaBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: C.accent, borderRadius: 9999, paddingVertical: 16, paddingHorizontal: 40, width: '100%', maxWidth: 400 },
-  ctaBtnText: { fontSize: 15, fontWeight: '800', color: '#09090b', letterSpacing: 1 },
-  permissionContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
-  permTitle: { fontSize: 22, fontWeight: '700', color: C.primary, textAlign: 'center' },
-  topBar: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'flex-end', gap: 12, paddingHorizontal: 20, paddingTop: 8, zIndex: 10 },
-  iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  instruction: { position: 'absolute', top: '12%', left: 0, right: 0, alignItems: 'center' },
-  instructionText: { color: 'rgba(255,255,255,0.8)', fontSize: 13, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
-  frame: { ...StyleSheet.absoluteFillObject, margin: 40 },
-  corner: { position: 'absolute', width: 28, height: 28, borderColor: C.accent, borderWidth: 2.5 },
-  cornerTop: { top: 0 },
-  cornerBottom: { bottom: 0 },
-  cornerLeft: { left: 0, borderRightWidth: 0, borderBottomWidth: 0 },
-  cornerRight: { right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
-  bottomBar: { position: 'absolute', bottom: 120, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 0 },
-  galleryBtn: { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center' },
-  shutter: { width: 80, height: 80, borderRadius: 40, backgroundColor: '#fff', borderWidth: 4, borderColor: C.accent, alignItems: 'center', justifyContent: 'center', marginHorizontal: 'auto', flex: 1 },
-  shutterDisabled: { opacity: 0.5 },
-  shutterInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
-  gymBar: { position: 'absolute', bottom: 60, left: 0, right: 0, flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 40, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 8 },
-  gymInputNative: { flex: 1, color: '#fff', fontSize: 13 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(9,9,11,0.85)', alignItems: 'center', justifyContent: 'center', gap: 16 },
-  loadingText: { color: C.accent, fontSize: 16, fontWeight: '600' },
-  
-  // Stiluri Angle Selector Web
-  angleContainerWeb: { alignItems: 'center', marginBottom: 12, width: '100%', maxWidth: 400 },
-  angleTitle: { color: C.secondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 },
-  angleButtons: { flexDirection: 'row', gap: 8, justifyContent: 'center' },
-  angleBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: C.card },
-  angleBtnActive: { borderColor: C.accent, backgroundColor: 'rgba(34,211,238,0.1)' },
-  angleBtnText: { color: C.secondary, fontSize: 14, fontWeight: '600' },
-  angleBtnTextActive: { color: C.accent },
-  degreeScrollWeb: { marginTop: 12, width: '100%' },
-  degBtn: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, backgroundColor: C.border },
-  degBtnActive: { backgroundColor: C.accent },
-  degBtnText: { color: C.secondary, fontSize: 13, fontWeight: '600' },
-  
-  // Stiluri Angle Selector Native (Peste cameră)
-  angleContainerNative: { position: 'absolute', bottom: 220, left: 0, right: 0, alignItems: 'center' },
-  angleBtnNative: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: 'transparent' },
-  angleBtnActiveNative: { borderColor: C.accent, backgroundColor: 'rgba(34,211,238,0.2)' },
-  angleBtnTextNative: { color: 'rgba(255,255,255,0.8)', fontSize: 13, fontWeight: '600' },
-  
-  // Design-ul pentru butoanele de grade de pe telefon
-  degreeWrapperNative: { width: '100%', marginTop: 12, height: 36 },
-  degBtnNative: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.6)', borderWidth: 1, borderColor: '#52525b' },
-  degBtnActiveNative: { backgroundColor: C.accent, borderColor: C.accent },
-  degBtnTextNative: { color: '#a1a1aa', fontSize: 13, fontWeight: '700' },
-  degBtnTextActiveNative: { color: '#09090b' },
+
+  // ── IDLE ──
+  idleWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  heroIcon: { marginBottom: 28 },
+  heroGradient: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(168,85,247,0.30)',
+  },
+  idleTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: C.primary,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  idleSub: {
+    fontSize: 14,
+    color: C.muted,
+    textAlign: 'center',
+    lineHeight: 21,
+    marginBottom: 36,
+  },
+  ctaGroup: { width: '100%', gap: 14 },
+  ctaCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: C.card,
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+    gap: 14,
+  },
+  ctaIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaTextWrap: { flex: 1 },
+  ctaTitle: { fontSize: 16, fontWeight: '700', color: C.primary },
+  ctaSub: { fontSize: 12, color: C.muted, marginTop: 2 },
+
+  // ── CAMERA ──
+  cameraTopBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    zIndex: 10,
+  },
+  closeBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recBadge: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  recDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: C.recRed,
+  },
+  recText: {
+    color: C.recRed,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  cameraInstruction: {
+    position: 'absolute',
+    bottom: 180,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  cameraInstructionText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    textAlign: 'center',
+  },
+  cameraBottomBar: {
+    position: 'absolute',
+    bottom: 70,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  recordBtn: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 4,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  recordBtnActive: {
+    borderColor: C.recRed,
+  },
+  recordInner: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: C.recRed,
+  },
+  recordInnerActive: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+  },
+
+  // ── ANALYZING ──
+  analyzingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  pulseRing: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(168,85,247,0.12)',
+    borderWidth: 2,
+    borderColor: 'rgba(168,85,247,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  analyzingTitle: {
+    color: C.primary,
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  analyzingSub: {
+    color: C.muted,
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
+  // ── RESULT ──
+  resultScroll: { padding: 20, paddingBottom: 40 },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 20,
+  },
+  resultHeaderTitle: {
+    color: C.primary,
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  coachCard: {
+    backgroundColor: 'rgba(24,24,27,0.92)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(168,85,247,0.25)',
+    padding: 20,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#a855f7',
+        shadowOpacity: 0.15,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 8 },
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  coachCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  coachCardTitle: {
+    color: C.accent,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  scoreSection: { alignItems: 'center', marginBottom: 4 },
+  scoreLabel: {
+    color: C.secondary,
+    fontSize: 13,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  scoreBig: { fontSize: 56, fontWeight: '900', lineHeight: 62 },
+  progressTrack: {
+    width: '100%',
+    height: 8,
+    backgroundColor: '#27272a',
+    borderRadius: 4,
+    marginTop: 12,
+    overflow: 'hidden',
+  },
+  progressFill: { height: '100%', borderRadius: 4 },
+  scoreMetaRow: { marginTop: 8 },
+  scoreMeta: { color: C.muted, fontSize: 12 },
+  divider: { height: 1, backgroundColor: '#27272a', marginVertical: 16 },
+  feedbackSection: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+  },
+  feedbackText: {
+    flex: 1,
+    color: C.secondary,
+    fontSize: 14,
+    fontStyle: 'italic',
+    lineHeight: 21,
+  },
+  metaCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+    padding: 16,
+    marginBottom: 20,
+  },
+  metaCardTitle: {
+    color: C.primary,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+  },
+  metaLabel: { color: C.muted, fontSize: 13 },
+  metaValue: { color: C.primary, fontSize: 13, fontWeight: '600' },
+  finishBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: C.accent,
+    borderRadius: 9999,
+    paddingVertical: 16,
+  },
+  finishBtnText: {
+    color: '#0d0d12',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
 });

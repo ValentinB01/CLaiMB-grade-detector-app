@@ -3,7 +3,10 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
-from models.schemas import AnalysisRequest, AnalysisResponse, RouteRecord
+from models.schemas import (
+    AnalysisRequest, AnalysisResponse, RouteRecord,
+    DetectRequest, DetectResponse,
+)
 from services.vision_service import VisionService
 from services.grading_service import GradingService
 from database import db
@@ -87,4 +90,27 @@ async def get_analysis(analysis_id: str):
         gym_name=doc.get("gym_name", "Unknown Gym"),
         processed_at=doc.get("analyzed_at", ""),
         detected_routes=doc.get("detected_routes", []) # Încărcăm traseele și din istoric
+    )
+
+
+# ---------------------------------------------------------------------------
+# Spray Wall — detect-only endpoint (Roboflow, no Gemini)
+# ---------------------------------------------------------------------------
+@router.post("/detect", response_model=DetectResponse)
+async def detect_holds(request: DetectRequest):
+    """Detect holds using Roboflow only. No Gemini grading involved."""
+    logger.info("🔍 /api/detect — Running Roboflow hold detection only")
+
+    try:
+        holds = await _vision.analyze_image(request.image_base64)
+    except Exception as exc:
+        logger.error(f"VisionService error in /detect: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Hold detection failed: {str(exc)}",
+        )
+
+    return DetectResponse(
+        holds=holds,
+        holds_count=len(holds),
     )

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -14,6 +15,26 @@ import { signOut } from 'firebase/auth';
 import { auth } from '../../firebaseConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+
+const API = process.env.EXPO_PUBLIC_API_URL;
+
+interface RecentClimb {
+  route_id: string;
+  gym_id: string;
+  color: string;
+  grade: string;
+  style: string;
+  points_awarded: number;
+  date: string;
+}
+
+interface UserStats {
+  user_id: string;
+  total_ascents: number;
+  total_points: number;
+  recent_climbs: RecentClimb[];
+}
 
 const C = {
   bg: '#0f172a',
@@ -31,6 +52,33 @@ export default function ProfileScreen() {
   const user = auth.currentUser;
   const displayName = user?.displayName || user?.email?.split('@')[0] || 'Cățărător';
   const email = user?.email || '—';
+
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const fetchStats = async () => {
+        if (!user?.uid) { setLoading(false); return; }
+        try {
+          setLoading(true);
+          setError(false);
+          const res = await fetch(`${API}/community/users/${user.uid}/stats`);
+          if (!res.ok) throw new Error('stats fetch failed');
+          const data: UserStats = await res.json();
+          if (active) setUserStats(data);
+        } catch {
+          if (active) setError(true);
+        } finally {
+          if (active) setLoading(false);
+        }
+      };
+      fetchStats();
+      return () => { active = false; };
+    }, [user?.uid])
+  );
 
   const handleSignOut = async () => {
     try {
@@ -59,12 +107,24 @@ export default function ProfileScreen() {
         <View style={s.statsRow}>
           <View style={s.statCard}>
             <Ionicons name="flash" size={22} color="#facc15" />
-            <Text style={s.statValue}>1 450</Text>
+            {loading ? (
+              <ActivityIndicator color={C.accent} style={{ marginVertical: 6 }} />
+            ) : (
+              <Text style={s.statValue}>
+                {error ? '—' : (userStats?.total_points ?? 0).toLocaleString('ro-RO')}
+              </Text>
+            )}
             <Text style={s.statLabel}>Puncte Totale</Text>
           </View>
           <View style={s.statCard}>
             <Ionicons name="trending-up" size={22} color="#22c55e" />
-            <Text style={s.statValue}>12</Text>
+            {loading ? (
+              <ActivityIndicator color={C.accent} style={{ marginVertical: 6 }} />
+            ) : (
+              <Text style={s.statValue}>
+                {error ? '—' : (userStats?.total_ascents ?? 0)}
+              </Text>
+            )}
             <Text style={s.statLabel}>Urcări</Text>
           </View>
         </View>
@@ -99,6 +159,36 @@ export default function ProfileScreen() {
             </View>
           </LinearGradient>
         </TouchableOpacity>
+
+        {/* ── Ultimele Urcări ─────────────────────────── */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>ULTIMELE URCĂRI</Text>
+          {loading ? (
+            <ActivityIndicator color={C.accent} style={{ marginVertical: 16 }} />
+          ) : !userStats?.recent_climbs?.length ? (
+            <View style={s.infoCard}>
+              <Text style={s.emptyText}>
+                Nu ai logat niciun traseu încă. Mergi în Arenă și începe aventura!
+              </Text>
+            </View>
+          ) : (
+            <View style={s.infoCard}>
+              {userStats.recent_climbs.map((climb, idx) => (
+                <React.Fragment key={climb.route_id + idx}>
+                  {idx > 0 && <View style={s.divider} />}
+                  <View style={s.climbRow}>
+                    <View style={[s.climbDot, { backgroundColor: climb.color.toLowerCase() }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.climbGrade}>{climb.grade}</Text>
+                      <Text style={s.climbMeta}>{climb.style} · {climb.points_awarded} pts</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={C.dim} />
+                  </View>
+                </React.Fragment>
+              ))}
+            </View>
+          )}
+        </View>
 
         {/* ── Account Info ───────────────────────────── */}
         <View style={s.section}>
@@ -231,6 +321,20 @@ const s = StyleSheet.create({
   infoLabel: { color: C.muted, fontSize: 13, fontWeight: '600' },
   infoValue: { color: C.text, fontSize: 14, fontWeight: '700' },
   divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
+
+  /* Recent climbs */
+  emptyText: {
+    color: C.muted, fontSize: 14, fontWeight: '500',
+    textAlign: 'center', lineHeight: 21, paddingVertical: 8,
+  },
+  climbRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4,
+  },
+  climbDot: {
+    width: 12, height: 12, borderRadius: 6,
+  },
+  climbGrade: { color: C.text, fontSize: 15, fontWeight: '800' },
+  climbMeta: { color: C.muted, fontSize: 12, fontWeight: '600', marginTop: 1 },
 
   /* Sign out */
   signOutCard: {

@@ -1,9 +1,3 @@
-<<<<<<< Updated upstream
-import { auth } from '../firebaseConfig'; // <-- IMPORT FOARTE IMPORTANT
-
-const BASE_URL = 'http://192.168.1.130:8000';
-// const BASE_URL = 'http://172.20.10.2:8000'
-=======
 import { auth } from '../firebaseConfig';
 import Constants from 'expo-constants';
 
@@ -48,7 +42,6 @@ const fetchWithTimeout = (
     clearTimeout(timer)
   );
 };
->>>>>>> Stashed changes
 
 export interface AnalyzePayload {
   image_base64: string;
@@ -57,10 +50,6 @@ export interface AnalyzePayload {
   user_id?: string;
 }
 
-<<<<<<< Updated upstream
-// Funcție utilitară: ia ID-ul userului curent sau pune 'guest' dacă nu e logat
-=======
->>>>>>> Stashed changes
 const getCurrentUserId = () => {
   return auth.currentUser?.uid || 'guest';
 };
@@ -122,8 +111,6 @@ export const deleteHistory = async (recordId: string) => {
   
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json();
-<<<<<<< Updated upstream
-=======
 };
 
 export const updateHistoryStatus = async (
@@ -245,6 +232,86 @@ export interface AskCoachPayload {
   gym_name?: string;
 }
 
+// ── Pose History (The Vault) ─────────────────────────────────
+export interface PoseRecord {
+  id: string;
+  user_id: string;
+  efficiency_score: number;
+  feedback: string;
+  total_active_frames: number;
+  frames_with_straight_arms: number;
+  video_url?: string;
+  analyzed_at: string;
+}
+
+export const fetchPoseHistory = async (): Promise<{ records: PoseRecord[]; total: number }> => {
+  const userId = getCurrentUserId();
+  const res = await fetch(`${BASE_URL}/api/pose-history?user_id=${userId}`);
+  if (!res.ok) throw new Error(`Pose history fetch failed: ${res.status}`);
+  return res.json();
+};
+
+// ── Pose / Video Analysis ────────────────────────────────────
+export interface PoseAnalysisResult {
+  metadata: {
+    fps: number;
+    width: number;
+    height: number;
+    total_frames: number;
+  };
+  frames: Record<string, number[][]>;
+  analysis: {
+    efficiency_score: number;
+    feedback: string;
+    total_active_frames: number;
+    frames_with_straight_arms: number;
+    per_frame_angles: Record<string, Record<string, number>>;
+  };
+  video_url: string;
+}
+
+export const analyzePose = async (
+  videoUri: string,
+  fileName: string,
+  onProgress?: (pct: number) => void
+): Promise<PoseAnalysisResult> => {
+  const userId = getCurrentUserId();
+  const formData = new FormData();
+  formData.append('video', {
+    uri: videoUri,
+    name: fileName || 'climbing_video.mp4',
+    type: 'video/mp4',
+  } as any);
+  formData.append('user_id', userId);
+
+  console.log('🎬 Pose: uploading video to', `${BASE_URL}/api/pose/analyze`, 'for user:', userId);
+
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/api/pose/analyze`,
+    {
+      method: 'POST',
+      body: formData,
+      // Do NOT set Content-Type — fetch will auto-set multipart boundary
+    },
+    300_000 // 5 min timeout for video processing
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('❌ Pose analysis error:', res.status, errText);
+    throw new Error(`Pose analysis error: ${res.status}`);
+  }
+
+  return await res.json();
+};
+
+export const fetchPoseProgress = async (progressId: string): Promise<number> => {
+  const res = await fetch(`${BASE_URL}/api/pose/progress/${progressId}`);
+  if (!res.ok) return -1;
+  const data = await res.json();
+  return data.progress ?? -1;
+};
+
 export const askCoach = async (payload: AskCoachPayload) => {
   try {
     const userId = getCurrentUserId();
@@ -273,5 +340,4 @@ export const askCoach = async (payload: AskCoachPayload) => {
     console.error("❌ ASK COACH FETCH ERROR:", error);
     throw error;
   }
->>>>>>> Stashed changes
 };

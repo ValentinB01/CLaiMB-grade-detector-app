@@ -1,6 +1,3 @@
-"""
-CLaiMB — FastAPI Application (Unified Backend: Coach & Community)
-"""
 import os
 import logging
 from pathlib import Path
@@ -9,6 +6,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Încarcă variabilele de mediu din .env
 load_dotenv(Path(__file__).parent / ".env")
@@ -21,11 +19,7 @@ from routes.users import router as users_router
 from routes.community import router as community_router
 from routes.analysis import router as analysis_router
 from routes.history import router as history_router
-<<<<<<< Updated upstream
-from database import connect_to_mongo, close_mongo_connection
-=======
 from routes.pose import router as pose_router
->>>>>>> Stashed changes
 
 # ---------------------------------------------------------------------------
 # 1. Definire Lifespan (Gestionare conexiune MongoDB)
@@ -48,13 +42,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-<<<<<<< Updated upstream
-=======
 # Creare folder pentru fișierele statice (videoclipurile procesate de YOLO)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
->>>>>>> Stashed changes
 # ---------------------------------------------------------------------------
 # 3. Middleware (CORS) - Esențial pentru conexiunea cu telefonul
 # ---------------------------------------------------------------------------
@@ -79,6 +70,7 @@ app.include_router(community_router, prefix="/community", tags=["Community"])
 # --- C. Rute AI Coach (Rutele vechi, păstrate sub /api pt compatibilitate) ---
 app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
 app.include_router(history_router, prefix="/api", tags=["History"])
+app.include_router(pose_router, prefix="/api", tags=["Pose"])
 
 
 # ---------------------------------------------------------------------------

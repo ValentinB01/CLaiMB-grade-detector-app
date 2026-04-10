@@ -1,8 +1,9 @@
 import os
 import cv2
 import json
+import math
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 # Try to import ultralytics, gracefully handling if it's not installed yet
 try:
@@ -16,6 +17,38 @@ logger = logging.getLogger(__name__)
 
 # Global dictionary to track video processing progress
 processing_status = {}
+
+# ── COCO Keypoint Indices (YOLO Pose) ──────────────────────
+KP_LEFT_SHOULDER  = 5
+KP_RIGHT_SHOULDER = 6
+KP_LEFT_ELBOW     = 7
+KP_RIGHT_ELBOW    = 8
+KP_LEFT_WRIST     = 9
+KP_RIGHT_WRIST    = 10
+
+STRAIGHT_ARM_THRESHOLD = 150  # degrees – above this the arm is considered "efficient"
+
+
+def calculate_angle(p1: Tuple[float, float],
+                    p2: Tuple[float, float],
+                    p3: Tuple[float, float]) -> float:
+    """
+    Calculate the angle (in degrees) at point p2 formed by segments p1→p2 and p3→p2.
+    Uses math.atan2 for a robust 0-180° result.
+    """
+    a = (p1[0] - p2[0], p1[1] - p2[1])
+    b = (p3[0] - p2[0], p3[1] - p2[1])
+    angle_rad = math.atan2(b[1], b[0]) - math.atan2(a[1], a[0])
+    angle_deg = abs(math.degrees(angle_rad))
+    if angle_deg > 180:
+        angle_deg = 360 - angle_deg
+    return angle_deg
+
+
+def _keypoint_valid(kp: List[float]) -> bool:
+    """A keypoint is valid when both x and y are non-zero (YOLO marks missing as 0,0)."""
+    return len(kp) >= 2 and (kp[0] != 0 or kp[1] != 0)
+
 
 class PoseService:
     def __init__(self):
@@ -147,9 +180,91 @@ class PoseService:
         
     def _analyze_climbing_metrics(self, frames_data: Dict[str, List[List[float]]]) -> Dict[str, Any]:
         """
-        Basic analysis of keypoints to extract climbing metrics.
+        Analyse keypoints across all frames and compute climbing heuristics.
+        Currently implements: Arm Efficiency (Straight Arm Rule).
         """
+        total_active_frames = 0
+        frames_with_straight_arms = 0
+        per_frame_angles: Dict[str, Dict[str, float]] = {}
+
+        for frame_key, keypoints in frames_data.items():
+            # keypoints is a list of [x, y] pairs indexed by COCO id
+            if len(keypoints) < 11:
+                continue  # not enough keypoints detected
+
+            left_shoulder  = keypoints[KP_LEFT_SHOULDER]
+            left_elbow     = keypoints[KP_LEFT_ELBOW]
+            left_wrist     = keypoints[KP_LEFT_WRIST]
+            right_shoulder = keypoints[KP_RIGHT_SHOULDER]
+            right_elbow    = keypoints[KP_RIGHT_ELBOW]
+            right_wrist    = keypoints[KP_RIGHT_WRIST]
+
+            left_valid  = all(_keypoint_valid(kp) for kp in [left_shoulder, left_elbow, left_wrist])
+            right_valid = all(_keypoint_valid(kp) for kp in [right_shoulder, right_elbow, right_wrist])
+
+            if not left_valid and not right_valid:
+                continue  # cannot evaluate any arm
+
+            total_active_frames += 1
+            frame_angles: Dict[str, float] = {}
+
+            left_straight = False
+            right_straight = False
+
+            if left_valid:
+                left_angle = calculate_angle(
+                    tuple(left_shoulder), tuple(left_elbow), tuple(left_wrist)
+                )
+                frame_angles["left_elbow"] = round(left_angle, 1)
+                left_straight = left_angle > STRAIGHT_ARM_THRESHOLD
+
+            if right_valid:
+                right_angle = calculate_angle(
+                    tuple(right_shoulder), tuple(right_elbow), tuple(right_wrist)
+                )
+                frame_angles["right_elbow"] = round(right_angle, 1)
+                right_straight = right_angle > STRAIGHT_ARM_THRESHOLD
+
+            # Frame counts as "efficient" if at least one arm is straight
+            if left_straight or right_straight:
+                frames_with_straight_arms += 1
+
+            per_frame_angles[frame_key] = frame_angles
+
+        # ── Compute final score ──
+        if total_active_frames > 0:
+            efficiency_score = round(
+                (frames_with_straight_arms / total_active_frames) * 100
+            )
+        else:
+            efficiency_score = 0
+
+        flexed_pct = 100 - efficiency_score
+
+        # ── Generate human-readable feedback ──
+        if efficiency_score >= 80:
+            feedback = (
+                f"Excelent! Ai mentinut bratele intinse in {efficiency_score}% din timp. "
+                "Continua sa lasi greutatea pe schelet pentru a economisi energie!"
+            )
+        elif efficiency_score >= 50:
+            feedback = (
+                f"Ai tinut bratele flexate in {flexed_pct}% din timp. "
+                "Incearca sa lasi greutatea pe schelet (brate intinse) "
+                "pentru a salva energie pe prizele bune!"
+            )
+        else:
+            feedback = (
+                f"Bratele tale au fost flexate in {flexed_pct}% din timp. "
+                "Acest lucru consuma foarte multa energie. "
+                "Concentreaza-te pe a intinde bratele complet atunci cand "
+                "citesti urmatoarea miscare!"
+            )
+
         return {
-            "message": "Metrics calculated successfully.",
-            "metrics_available": ["straight_arms", "center_of_mass_trajectory", "velocity"]
+            "efficiency_score": efficiency_score,
+            "feedback": feedback,
+            "total_active_frames": total_active_frames,
+            "frames_with_straight_arms": frames_with_straight_arms,
+            "per_frame_angles": per_frame_angles,
         }

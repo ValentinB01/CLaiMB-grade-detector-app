@@ -2,10 +2,6 @@ import os
 import json
 import base64
 import logging
-<<<<<<< Updated upstream
-import httpx # Asigură-te că ai rulat: pip install httpx
-from typing import List, Optional
-=======
 import io
 import binascii
 import httpx # Asigură-te că ai rulat: pip install httpx
@@ -20,7 +16,6 @@ except ImportError:
     print("⚠️ pillow-heif NOT found. iPhone (HEIC) images will fail.")
     pass
 
->>>>>>> Stashed changes
 from models.schemas import HoldLocation
 
 logger = logging.getLogger(__name__)
@@ -39,8 +34,6 @@ class VisionService:
         # Construim URL-ul corect
         self.url = f"https://detect.roboflow.com/{self.project}/{self.version}"
 
-<<<<<<< Updated upstream
-=======
     def _resize_base64(self, image_base64: str) -> str:
         """Resize image to max MAX_DIM px if larger, returns base64 string."""
         try:
@@ -76,7 +69,6 @@ class VisionService:
             logger.warning(f"⚠️ Resize failed, using original: {e}")
             return image_base64
 
->>>>>>> Stashed changes
     async def analyze_image(self, image_base64: str) -> List[HoldLocation]:
         """Punctul de intrare principal pentru analiza imaginii."""
         # Plasa de siguranță pentru input gol sau prea mic
@@ -96,16 +88,12 @@ class VisionService:
             # 1. Curățăm string-ul de prefixul de la telefon (ex: "data:image/jpeg;base64,...")
             clean_base64 = image_base64.split(",")[-1] if "," in image_base64 else image_base64
 
-<<<<<<< Updated upstream
-            async with httpx.AsyncClient(timeout=20) as client:
-=======
             # 2. Resize image to reduce upload size
             clean_base64 = self._resize_base64(clean_base64)
 
             logger.info(f"📤 Sending to Roboflow (b64 len: {len(clean_base64)})")
             
             async with httpx.AsyncClient(timeout=60) as client:
->>>>>>> Stashed changes
                 resp = await client.post(
                     self.url,
                     params={"api_key": self.roboflow_key},
@@ -114,13 +102,9 @@ class VisionService:
                 )
 
             if resp.status_code != 200:
-<<<<<<< Updated upstream
-                logger.error(f"⚠️ Roboflow Error {resp.status_code}: {resp.text}")
-=======
                 error_txt = resp.text
                 logger.error(f"⚠️ Roboflow Error {resp.status_code}: {error_txt}")
                 print(f"❌ ROBOFLOW ERROR: {resp.status_code} - {error_txt}")
->>>>>>> Stashed changes
                 return self._fallback_holds()
 
             data = resp.json()
