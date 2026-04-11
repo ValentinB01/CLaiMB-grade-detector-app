@@ -219,25 +219,26 @@ export const gradeSelection = async (payload: GradeSelectionPayload) => {
 
 
 export interface ChatMessagePayload {
-  role: 'user' | 'coach';
+  role: 'user' | 'model';
   text: string;
 }
 
 export interface AskCoachPayload {
-  image_base64: string;
-  holds: any[];
-  prompt: string;
-  history?: ChatMessagePayload[];
-  wall_angle?: string;
-  gym_name?: string;
+  messages: ChatMessagePayload[];
 }
 
 // ── Pose History (The Vault) ─────────────────────────────────
 export interface PoseRecord {
   id: string;
   user_id: string;
+  final_overall_score: number;
+  consolidated_feedback: string;
   efficiency_score: number;
   feedback: string;
+  balance_score: number;
+  balance_feedback: string;
+  fluidity_score: number;
+  fluidity_feedback: string;
   total_active_frames: number;
   frames_with_straight_arms: number;
   video_url?: string;
@@ -251,6 +252,15 @@ export const fetchPoseHistory = async (): Promise<{ records: PoseRecord[]; total
   return res.json();
 };
 
+export const deletePoseHistory = async (analysisId: string): Promise<{ message: string }> => {
+  const userId = getCurrentUserId();
+  const res = await fetch(`${BASE_URL}/api/pose-history/${analysisId}?user_id=${userId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Delete pose history failed: ${res.status}`);
+  return res.json();
+};
+
 // ── Pose / Video Analysis ────────────────────────────────────
 export interface PoseAnalysisResult {
   metadata: {
@@ -261,11 +271,22 @@ export interface PoseAnalysisResult {
   };
   frames: Record<string, number[][]>;
   analysis: {
+    final_overall_score: number;
+    consolidated_feedback: string;
     efficiency_score: number;
     feedback: string;
     total_active_frames: number;
     frames_with_straight_arms: number;
     per_frame_angles: Record<string, Record<string, number>>;
+    balance_score?: number;
+    balance_feedback?: string;
+    balance_active_frames?: number;
+    frames_in_balance?: number;
+    fluidity_score?: number;
+    fluidity_feedback?: string;
+    static_frames?: number;
+    moving_frames?: number;
+    total_active_fluidity_frames?: number;
   };
   video_url: string;
 }
@@ -312,9 +333,8 @@ export const fetchPoseProgress = async (progressId: string): Promise<number> => 
   return data.progress ?? -1;
 };
 
-export const askCoach = async (payload: AskCoachPayload) => {
+export const askCoach = async (payload: AskCoachPayload): Promise<{ reply: string }> => {
   try {
-    const userId = getCurrentUserId();
     console.log("💬 Coaching Chat:", `${BASE_URL}/api/chat`);
 
     const res = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
@@ -323,10 +343,7 @@ export const askCoach = async (payload: AskCoachPayload) => {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify({
-        ...payload,
-        user_id: userId,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {

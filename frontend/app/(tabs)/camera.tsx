@@ -210,11 +210,11 @@ export default function CameraScreen() {
             <Ionicons name="body-outline" size={48} color={C.accent} />
           </View>
           <Text style={styles.analyzingTitle}>
-            AI Coach proceseaza miscarile tale...
+            AI Coach proceseaza urcarea ta...
           </Text>
           <Text style={styles.analyzingSub}>
-            Calculam unghiurile bratelor cu YOLO11 Pose.{'\n'}
-            Acest lucru poate dura cateva momente.
+            Analizam eficienta bratelor, fluiditatea miscarilor{'\n'}
+            si centrul de greutate. Te rugam sa astepti.
           </Text>
           <ActivityIndicator color={C.accent} size="large" style={{ marginTop: 24 }} />
         </View>
@@ -226,8 +226,48 @@ export default function CameraScreen() {
   //  STATE: RESULT
   // ═══════════════════════════════════════════════════════════
   if (appState === 'result' && result) {
-    const score = result.analysis.efficiency_score;
-    const color = scoreColor(score);
+    const { analysis } = result;
+
+    const MetricCard = ({
+      icon,
+      title,
+      score,
+      feedback,
+      subtitle,
+    }: {
+      icon: React.ComponentProps<typeof Ionicons>['name'];
+      title: string;
+      score: number;
+      feedback: string;
+      subtitle?: string;
+    }) => {
+      const color = scoreColor(score);
+      return (
+        <View style={styles.metricCard}>
+          <View style={styles.metricHeader}>
+            <View style={[styles.metricIconWrap, { backgroundColor: color + '18' }]}>
+              <Ionicons name={icon} size={22} color={color} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.metricTitle}>{title}</Text>
+              {subtitle ? <Text style={styles.metricSubtitle}>{subtitle}</Text> : null}
+            </View>
+            <Text style={[styles.metricScoreBig, { color }]}>{score}%</Text>
+          </View>
+
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${score}%`, backgroundColor: color },
+              ]}
+            />
+          </View>
+
+          <Text style={styles.metricFeedback}>{feedback}</Text>
+        </View>
+      );
+    };
 
     return (
       <SafeAreaView style={styles.container}>
@@ -238,47 +278,47 @@ export default function CameraScreen() {
           {/* Header */}
           <View style={styles.resultHeader}>
             <Ionicons name="analytics-outline" size={28} color={C.accent} />
-            <Text style={styles.resultHeaderTitle}>Rezultat Analiza</Text>
+            <Text style={styles.resultHeaderTitle}>Analiza Ta Detaliata</Text>
           </View>
 
-          {/* AI Coach Card */}
-          <View style={styles.coachCard}>
-            <View style={styles.coachCardHeader}>
-              <Ionicons name="sparkles" size={20} color={C.accent} />
-              <Text style={styles.coachCardTitle}>AI Coach Feedback</Text>
-            </View>
+          {/* Arm Efficiency */}
+          <MetricCard
+            icon="fitness-outline"
+            title="Eficienta Bratelor"
+            score={analysis.efficiency_score}
+            feedback={analysis.feedback}
+            subtitle={`${analysis.frames_with_straight_arms} / ${analysis.total_active_frames} cadre eficiente`}
+          />
 
-            {/* Efficiency Score */}
-            <View style={styles.scoreSection}>
-              <Text style={styles.scoreLabel}>Eficienta Bratelor</Text>
-              <Text style={[styles.scoreBig, { color }]}>{score}%</Text>
+          {/* Balance – render only if data exists */}
+          {analysis.balance_score != null && analysis.balance_feedback != null && (
+            <MetricCard
+              icon="scale-outline"
+              title="Echilibru (Center of Gravity)"
+              score={analysis.balance_score}
+              feedback={analysis.balance_feedback}
+              subtitle={
+                analysis.frames_in_balance != null && analysis.balance_active_frames != null
+                  ? `${analysis.frames_in_balance} / ${analysis.balance_active_frames} cadre in echilibru`
+                  : undefined
+              }
+            />
+          )}
 
-              {/* Progress Bar */}
-              <View style={styles.progressTrack}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: `${score}%`, backgroundColor: color },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.scoreMetaRow}>
-                <Text style={styles.scoreMeta}>
-                  {result.analysis.frames_with_straight_arms} / {result.analysis.total_active_frames} cadre eficiente
-                </Text>
-              </View>
-            </View>
-
-            {/* Divider */}
-            <View style={styles.divider} />
-
-            {/* Feedback Text */}
-            <View style={styles.feedbackSection}>
-              <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.secondary} />
-              <Text style={styles.feedbackText}>{result.analysis.feedback}</Text>
-            </View>
-          </View>
+          {/* Time Under Tension – render only if data exists */}
+          {analysis.fluidity_score != null && analysis.fluidity_feedback != null && (
+            <MetricCard
+              icon="speedometer-outline"
+              title="Fluiditate (Time Under Tension)"
+              score={analysis.fluidity_score}
+              feedback={analysis.fluidity_feedback}
+              subtitle={
+                analysis.moving_frames != null && analysis.total_active_fluidity_frames != null
+                  ? `${analysis.moving_frames} / ${analysis.total_active_fluidity_frames} cadre in miscare`
+                  : undefined
+              }
+            />
+          )}
 
           {/* Video Metadata Card */}
           <View style={styles.metaCard}>
@@ -299,10 +339,10 @@ export default function CameraScreen() {
             </View>
           </View>
 
-          {/* Finish / New Analysis */}
+          {/* Finish & Save */}
           <TouchableOpacity style={styles.finishBtn} onPress={resetStudio}>
-            <Ionicons name="refresh" size={20} color="#0d0d12" />
-            <Text style={styles.finishBtnText}>Analizeaza alta urcare</Text>
+            <Ionicons name="checkmark-done" size={20} color="#0d0d12" />
+            <Text style={styles.finishBtnText}>Finalizeaza si Salveaza in Vault</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -578,68 +618,65 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
   },
-  coachCard: {
-    backgroundColor: 'rgba(24,24,27,0.92)',
+  metricCard: {
+    backgroundColor: C.card,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(168,85,247,0.25)',
+    borderColor: C.cardBorder,
     padding: 20,
-    marginBottom: 16,
+    marginBottom: 14,
     ...Platform.select({
       ios: {
-        shadowColor: '#a855f7',
-        shadowOpacity: 0.15,
-        shadowRadius: 20,
-        shadowOffset: { width: 0, height: 8 },
+        shadowColor: '#000',
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 4 },
       },
-      android: { elevation: 8 },
+      android: { elevation: 6 },
     }),
   },
-  coachCardHeader: {
+  metricHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
+    gap: 12,
+    marginBottom: 14,
   },
-  coachCardTitle: {
-    color: C.accent,
-    fontSize: 16,
+  metricIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metricTitle: {
+    color: C.primary,
+    fontSize: 15,
     fontWeight: '700',
-    letterSpacing: 0.5,
   },
-  scoreSection: { alignItems: 'center', marginBottom: 4 },
-  scoreLabel: {
-    color: C.secondary,
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 6,
+  metricSubtitle: {
+    color: C.muted,
+    fontSize: 12,
+    marginTop: 2,
   },
-  scoreBig: { fontSize: 56, fontWeight: '900', lineHeight: 62 },
+  metricScoreBig: {
+    fontSize: 32,
+    fontWeight: '900',
+    lineHeight: 36,
+  },
   progressTrack: {
     width: '100%',
     height: 8,
     backgroundColor: '#27272a',
     borderRadius: 4,
-    marginTop: 12,
     overflow: 'hidden',
   },
   progressFill: { height: '100%', borderRadius: 4 },
-  scoreMetaRow: { marginTop: 8 },
-  scoreMeta: { color: C.muted, fontSize: 12 },
-  divider: { height: 1, backgroundColor: '#27272a', marginVertical: 16 },
-  feedbackSection: {
-    flexDirection: 'row',
-    gap: 10,
-    alignItems: 'flex-start',
-  },
-  feedbackText: {
-    flex: 1,
+  metricFeedback: {
     color: C.secondary,
-    fontSize: 14,
+    fontSize: 13,
     fontStyle: 'italic',
-    lineHeight: 21,
+    lineHeight: 20,
+    marginTop: 12,
   },
   metaCard: {
     backgroundColor: C.card,

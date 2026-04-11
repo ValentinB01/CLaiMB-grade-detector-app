@@ -25,8 +25,18 @@ KP_LEFT_ELBOW     = 7
 KP_RIGHT_ELBOW    = 8
 KP_LEFT_WRIST     = 9
 KP_RIGHT_WRIST    = 10
+KP_LEFT_HIP       = 11
+KP_RIGHT_HIP      = 12
+KP_LEFT_ANKLE     = 15
+KP_RIGHT_ANKLE    = 16
 
 STRAIGHT_ARM_THRESHOLD = 150  # degrees – above this the arm is considered "efficient"
+BALANCE_MARGIN_PCT     = 0.15  # 15% tolerance on each side of the base of support
+FLUIDITY_THRESHOLD     = 0.07  # ratio – net CoM displacement must exceed 7% of torso to be "moving"
+FLUIDITY_WINDOW_FRAMES = 12    # frames – look-back window for displacement measurement
+FLUIDITY_Y_WEIGHT      = 1.8   # vertical movement counts 1.8× more than horizontal (climbing = upward)
+COM_SMOOTH_WINDOW      = 5     # frames – moving-average kernel to de-noise YOLO jitter
+ACTIVE_Y_JUMP_THRESH   = 0.15  # ratio – min Y displacement (relative to torso) to mark climbing start
 
 
 def calculate_angle(p1: Tuple[float, float],
@@ -187,6 +197,10 @@ class PoseService:
         frames_with_straight_arms = 0
         per_frame_angles: Dict[str, Dict[str, float]] = {}
 
+        # ── Balance / Center of Gravity counters ──
+        balance_active_frames = 0
+        frames_in_balance = 0
+
         for frame_key, keypoints in frames_data.items():
             # keypoints is a list of [x, y] pairs indexed by COCO id
             if len(keypoints) < 11:
@@ -231,7 +245,122 @@ class PoseService:
 
             per_frame_angles[frame_key] = frame_angles
 
-        # ── Compute final score ──
+            # ── Center of Gravity / Base of Support ──
+            if len(keypoints) > KP_RIGHT_ANKLE:
+                left_hip    = keypoints[KP_LEFT_HIP]
+                right_hip   = keypoints[KP_RIGHT_HIP]
+                left_ankle  = keypoints[KP_LEFT_ANKLE]
+                right_ankle = keypoints[KP_RIGHT_ANKLE]
+
+                hips_valid  = _keypoint_valid(left_hip) and _keypoint_valid(right_hip)
+                feet_valid  = _keypoint_valid(left_ankle) and _keypoint_valid(right_ankle)
+
+                if hips_valid and feet_valid:
+                    balance_active_frames += 1
+
+                    x_center_mass = (left_hip[0] + right_hip[0]) / 2.0
+                    min_x_feet = min(left_ankle[0], right_ankle[0])
+                    max_x_feet = max(left_ankle[0], right_ankle[0])
+
+                    base_width = max_x_feet - min_x_feet
+                    margin = base_width * BALANCE_MARGIN_PCT
+
+                    if (min_x_feet - margin) <= x_center_mass <= (max_x_feet + margin):
+                        frames_in_balance += 1
+
+        # ── Time Under Tension / Fluidity ──
+        sorted_keys = sorted(frames_data.keys(), key=int)
+
+        # 1. Collect raw centre-of-mass + per-frame torso length for normalisation
+        raw_com: List[Tuple[str, float, float, float]] = []  # (key, cx, cy, torso_len)
+        for frame_key in sorted_keys:
+            keypoints = frames_data[frame_key]
+            if len(keypoints) <= KP_RIGHT_HIP:
+                continue
+            l_hip = keypoints[KP_LEFT_HIP]
+            r_hip = keypoints[KP_RIGHT_HIP]
+            l_sh  = keypoints[KP_LEFT_SHOULDER]
+            if not (_keypoint_valid(l_hip) and _keypoint_valid(r_hip)):
+                continue
+            cx = (l_hip[0] + r_hip[0]) / 2.0
+            cy = (l_hip[1] + r_hip[1]) / 2.0
+            # torso reference = left shoulder → left hip (robust single-side measurement)
+            if _keypoint_valid(l_sh):
+                torso = math.dist((l_sh[0], l_sh[1]), (l_hip[0], l_hip[1]))
+            else:
+                torso = 0.0
+            raw_com.append((frame_key, cx, cy, torso))
+
+        # 2. Smoothing – simple moving average on cx, cy to kill YOLO jitter
+        half_k = COM_SMOOTH_WINDOW // 2
+        smoothed_com: List[Tuple[str, float, float, float]] = []
+        for i in range(len(raw_com)):
+            lo = max(0, i - half_k)
+            hi = min(len(raw_com), i + half_k + 1)
+            avg_cx = sum(r[1] for r in raw_com[lo:hi]) / (hi - lo)
+            avg_cy = sum(r[2] for r in raw_com[lo:hi]) / (hi - lo)
+            smoothed_com.append((raw_com[i][0], avg_cx, avg_cy, raw_com[i][3]))
+
+        # median torso length as stable reference (ignores outlier frames)
+        torso_lengths = sorted(t for (_, _, _, t) in smoothed_com if t > 0)
+        if torso_lengths:
+            median_torso = torso_lengths[len(torso_lengths) // 2]
+        else:
+            median_torso = 1.0  # fallback – treat as raw pixels
+
+        # 3. Determine active climbing window (relative to torso length)
+        active_start_idx = 0
+        active_end_idx = len(smoothed_com) - 1
+        if len(smoothed_com) > 1:
+            first_y = smoothed_com[0][2]
+            for i, (_, _, cy, _) in enumerate(smoothed_com):
+                if abs(first_y - cy) / median_torso >= ACTIVE_Y_JUMP_THRESH:
+                    active_start_idx = i
+                    break
+            last_y = smoothed_com[-1][2]
+            for i in range(len(smoothed_com) - 1, -1, -1):
+                if abs(last_y - smoothed_com[i][2]) / median_torso >= ACTIVE_Y_JUMP_THRESH:
+                    active_end_idx = i
+                    break
+
+        active_com = smoothed_com[active_start_idx:active_end_idx + 1]
+
+        # 4. Classify each active frame as moving or static
+        #    We use a weighted Euclidean distance where vertical movement
+        #    (climbing direction) counts FLUIDITY_Y_WEIGHT× more than horizontal
+        #    sway. This filters out lateral resting-sway while rewarding
+        #    intentional upward/downward displacement toward the next hold.
+        #
+        #    Sway filter: when the net displacement over the full window is
+        #    below the threshold, ALL frames in that window are marked static
+        #    (the climber was oscillating in place, not progressing).
+        n = len(active_com)
+        window = max(1, FLUIDITY_WINDOW_FRAMES)
+        # Pre-compute per-frame label: True = moving
+        frame_moving = [False] * n
+
+        for i in range(n):
+            ref_idx = max(0, i - window)
+            dx = active_com[i][1] - active_com[ref_idx][1]
+            dy = active_com[i][2] - active_com[ref_idx][2]
+            weighted_dist = math.sqrt(dx * dx + (dy * FLUIDITY_Y_WEIGHT) ** 2)
+            relative_dist = weighted_dist / median_torso
+            frame_moving[i] = relative_dist >= FLUIDITY_THRESHOLD
+
+        # Sway filter: if the END of a window is static, force all frames
+        # in that window to static (prevents counting sway-oscillation frames
+        # that individually crossed the threshold but returned to origin).
+        for i in range(n):
+            if not frame_moving[i]:
+                lo = max(0, i - window + 1)
+                for j in range(lo, i + 1):
+                    frame_moving[j] = False
+
+        moving_frames = sum(frame_moving)
+        static_frames = n - moving_frames
+        total_active_fluidity = n
+
+        # ── Compute final scores ──
         if total_active_frames > 0:
             efficiency_score = round(
                 (frames_with_straight_arms / total_active_frames) * 100
@@ -240,6 +369,24 @@ class PoseService:
             efficiency_score = 0
 
         flexed_pct = 100 - efficiency_score
+
+        if balance_active_frames > 0:
+            balance_score = round(
+                (frames_in_balance / balance_active_frames) * 100
+            )
+        else:
+            balance_score = 0
+
+        off_balance_pct = 100 - balance_score
+
+        if total_active_fluidity > 0:
+            fluidity_score = round(
+                (moving_frames / total_active_fluidity) * 100
+            )
+        else:
+            fluidity_score = 0
+        fluidity_score = max(0, min(100, fluidity_score))
+        static_pct = 100 - fluidity_score
 
         # ── Generate human-readable feedback ──
         if efficiency_score >= 80:
@@ -261,10 +408,69 @@ class PoseService:
                 "citesti urmatoarea miscare!"
             )
 
+        # ── Generate balance feedback ──
+        if balance_score >= 80:
+            balance_feedback = (
+                f"Excelent! Centrul tau de greutate a ramas deasupra bazei de sustinere "
+                f"in {balance_score}% din timp. Echilibrul tau este foarte bun!"
+            )
+        elif balance_score >= 50:
+            balance_feedback = (
+                f"Centrul tau de greutate a iesit din baza de sustinere in {off_balance_pct}% din timp. "
+                "Incearca sa iti muti soldurile deasupra picioarelor inainte de a intinde mana."
+            )
+        else:
+            balance_feedback = (
+                f"Centrul tau de greutate a fost in afara bazei de sustinere in {off_balance_pct}% din timp. "
+                "Acest lucru indica un dezechilibru frecvent (barn door). "
+                "Concentreaza-te pe a aduce soldurile deasupra picioarelor pentru stabilitate!"
+            )
+
+        # ── Generate fluidity (Time Under Tension) feedback ──
+        if fluidity_score >= 80:
+            fluidity_feedback = (
+                f"Excelent! Ai mentinut un ritm fluid in {fluidity_score}% din timp. "
+                "Miscarea ta este cursiva si eficienta energetic!"
+            )
+        elif fluidity_score >= 50:
+            fluidity_feedback = (
+                f"Ai petrecut {static_pct}% din timp ezitand intr-o pozitie statica. "
+                "Incearca sa citesti traseul de jos pentru a mentine un ritm fluid si a salva energie."
+            )
+        else:
+            fluidity_feedback = (
+                f"Ai petrecut {static_pct}% din timp blocat intr-o pozitie statica. "
+                "Acest lucru consuma energie si indica ezitare frecventa. "
+                "Planifica-ti miscarile inainte de a urca si concentreaza-te pe un ritm constant!"
+            )
+
+        # ── Consolidated overall score & feedback ──
+        final_overall_score = round(
+            (efficiency_score + balance_score + fluidity_score) / 3
+        )
+        final_overall_score = max(0, min(100, final_overall_score))
+
+        consolidated_feedback = (
+            f"Brate: {feedback} | "
+            f"Echilibru: {balance_feedback} | "
+            f"Fluiditate: {fluidity_feedback}"
+        )
+
         return {
+            "final_overall_score": final_overall_score,
+            "consolidated_feedback": consolidated_feedback,
             "efficiency_score": efficiency_score,
             "feedback": feedback,
             "total_active_frames": total_active_frames,
             "frames_with_straight_arms": frames_with_straight_arms,
             "per_frame_angles": per_frame_angles,
+            "balance_score": balance_score,
+            "balance_feedback": balance_feedback,
+            "balance_active_frames": balance_active_frames,
+            "frames_in_balance": frames_in_balance,
+            "fluidity_score": fluidity_score,
+            "fluidity_feedback": fluidity_feedback,
+            "static_frames": static_frames,
+            "moving_frames": moving_frames,
+            "total_active_fluidity_frames": total_active_fluidity,
         }

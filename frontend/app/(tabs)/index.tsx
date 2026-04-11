@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Platform,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import { auth } from '../../firebaseConfig';
 import { signOut } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import { fetchPoseHistory, PoseRecord } from '../../utils/api';
 
 const C = {
   bg: '#09090b',
@@ -312,6 +314,9 @@ const K = {
   accent: '#a855f7',
   accentDim: 'rgba(168,85,247,0.12)',
   accentBorder: 'rgba(168,85,247,0.30)',
+  neon: '#39ff14',
+  neonDim: 'rgba(57,255,20,0.12)',
+  neonBorder: 'rgba(57,255,20,0.30)',
   green: '#22c55e',
   ctaRed: '#ef4444',
 };
@@ -322,14 +327,103 @@ const todayFormatted = () => {
   return d.toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' });
 };
 
+/* ── Helper: relative time ───────────────────────────────── */
+const timeAgo = (dateStr: string) => {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMin = Math.floor((now - then) / 60000);
+  if (diffMin < 1) return 'chiar acum';
+  if (diffMin < 60) return `acum ${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `acum ${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  return `acum ${diffD}z`;
+};
+
 /* ── CoachDashboard ──────────────────────────────────────── */
 function CoachDashboard() {
   const router = useRouter();
   const userEmail = auth.currentUser?.email;
   const userName = userEmail ? userEmail.split('@')[0] : null;
 
-  // Mock progress data (will be replaced with real API data)
-  const efficiencyScore = 78;
+  const [totalSessions, setTotalSessions] = useState(0);
+  const [averageScore, setAverageScore] = useState(0);
+  const [lastAnalysis, setLastAnalysis] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // ── Breathing animation for CTA ──
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.95,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulseAnim]);
+
+  // ── Fetch pose history on every focus ──
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      const load = async () => {
+        try {
+          setLoading(true);
+          const data = await fetchPoseHistory();
+          if (cancelled) return;
+
+          const records: PoseRecord[] = data.records || [];
+          setTotalSessions(records.length);
+
+          if (records.length > 0) {
+            // Sort descending by analyzed_at
+            const sorted = [...records].sort(
+              (a, b) => new Date(b.analyzed_at).getTime() - new Date(a.analyzed_at).getTime()
+            );
+            setLastAnalysis(sorted[0].analyzed_at);
+
+            // Average of final_overall_score from last 5 sessions
+            const last5 = sorted.slice(0, 5);
+            const avg = last5.reduce((sum, r) => sum + (r.final_overall_score ?? r.efficiency_score ?? 0), 0) / last5.length;
+            setAverageScore(Math.round(avg));
+          } else {
+            setAverageScore(0);
+            setLastAnalysis(null);
+          }
+        } catch (err) {
+          console.error('Dashboard fetch error:', err);
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      };
+
+      load();
+      return () => { cancelled = true; };
+    }, [])
+  );
+
+  // ── Score color ──
+  const scoreColor = averageScore >= 70 ? K.neon : averageScore >= 40 ? '#fbbf24' : K.ctaRed;
+
+  // ── AI Insight text ──
+  const insightText =
+    averageScore === 0 && totalSessions === 0
+      ? 'Nu ai nicio sesiune înregistrată. Lansează prima ta analiză video și descoperă-ți potențialul!'
+      : averageScore < 60
+        ? 'AI Insight: Scorurile tale recente indică ezitări. Focusează-te azi pe Quiet Feet și echilibru.'
+        : 'AI Insight: Ritmul tău este bun! Încearcă rute cu mișcări mai dinamice azi.';
 
   return (
     <SafeAreaView style={coachStyles.container}>
@@ -337,14 +431,14 @@ function CoachDashboard() {
         contentContainerStyle={coachStyles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Section 1: Header & Greeting ────────────── */}
+        {/* ── Header & Greeting ────────────────────────── */}
         <View style={coachStyles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={coachStyles.greeting}>
-              Salutare{userName ? `, ${userName}` : ''}! 🧗‍♂️
+              Salut, Cățărătorule! 🧗‍♂️
             </Text>
             <Text style={coachStyles.dateLine}>
-              {todayFormatted()} — Gata pentru un nou antrenament?
+              {todayFormatted()} — Hai să urcăm!
             </Text>
           </View>
 
@@ -364,59 +458,104 @@ function CoachDashboard() {
           </View>
         </View>
 
-        {/* ── Section 2: Daily AI Insight ─────────────── */}
+        {/* ── Quick Stats Row ──────────────────────────── */}
+        <View style={coachStyles.statsRow}>
+          <LinearGradient
+            colors={['rgba(168,85,247,0.15)', 'rgba(168,85,247,0.04)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={coachStyles.statCard}
+          >
+            <Ionicons name="barbell-outline" size={22} color={K.accent} />
+            <Text style={coachStyles.statValue}>
+              {loading ? '—' : totalSessions}
+            </Text>
+            <Text style={coachStyles.statLabel}>Sesiuni Totale</Text>
+          </LinearGradient>
+
+          <LinearGradient
+            colors={['rgba(57,255,20,0.12)', 'rgba(57,255,20,0.03)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={coachStyles.statCard}
+          >
+            <Ionicons name="time-outline" size={22} color={K.neon} />
+            <Text style={[coachStyles.statValue, { color: K.neon }]}>
+              {loading ? '—' : lastAnalysis ? timeAgo(lastAnalysis) : 'N/A'}
+            </Text>
+            <Text style={coachStyles.statLabel}>Ultima Analiză</Text>
+          </LinearGradient>
+        </View>
+
+        {/* ── Scorul Tău (Main Progress Bar) ───────────── */}
+        <View style={coachStyles.progressCard}>
+          <View style={coachStyles.progressHeader}>
+            <Ionicons name="analytics-outline" size={20} color={K.accent} />
+            <Text style={coachStyles.progressTitle}>Scorul Tău</Text>
+          </View>
+
+          {loading ? (
+            <ActivityIndicator color={K.accent} size="large" style={{ marginVertical: 24 }} />
+          ) : (
+            <>
+              <Text style={[coachStyles.scoreBig, { color: scoreColor }]}>
+                {averageScore}%
+              </Text>
+
+              <View style={coachStyles.barTrack}>
+                <LinearGradient
+                  colors={[K.accent, K.neon]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[
+                    coachStyles.barFill,
+                    { width: `${Math.min(averageScore, 100)}%` },
+                  ]}
+                />
+              </View>
+
+              <Text style={coachStyles.progressHint}>
+                Eficiența ta medie (ultimele 5 urcări)
+              </Text>
+            </>
+          )}
+        </View>
+
+        {/* ── Dynamic AI Insight ───────────────────────── */}
         <LinearGradient
-          colors={['rgba(168,85,247,0.18)', 'rgba(168,85,247,0.04)']}
+          colors={['rgba(168,85,247,0.18)', 'rgba(57,255,20,0.06)']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={coachStyles.insightCard}
         >
           <View style={coachStyles.insightHeader}>
-            <Ionicons name="sparkles" size={20} color={K.accent} />
+            <Ionicons name="sparkles" size={20} color={K.neon} />
             <Text style={coachStyles.insightBadge}>AI Insight</Text>
           </View>
-          <Text style={coachStyles.insightText}>
-            La ultima sesiune ai avut tendința să tragi prea mult din bicepși.
-            Azi, concentrează-te pe a împinge mai mult din picioare pe prizele
-            mici.
-          </Text>
+          <Text style={coachStyles.insightText}>{insightText}</Text>
         </LinearGradient>
 
-        {/* ── Section 3: Progress Summary ────────────── */}
-        <View style={coachStyles.progressCard}>
-          <View style={coachStyles.progressHeader}>
-            <Ionicons name="analytics-outline" size={20} color={K.accent} />
-            <Text style={coachStyles.progressTitle}>Eficiența Medie a Tehnicii</Text>
-          </View>
+        {/* ── Breathing CTA Button ─────────────────────── */}
+        <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+          <TouchableOpacity
+            style={coachStyles.ctaBtn}
+            onPress={() => router.push('/(tabs)/camera')}
+            activeOpacity={0.85}
+          >
+            <LinearGradient
+              colors={[K.accent, K.neon]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={coachStyles.ctaGradient}
+            >
+              <Ionicons name="videocam" size={22} color="#fff" />
+              <Text style={coachStyles.ctaText}>Lansează Analiza Video</Text>
+              <Ionicons name="arrow-forward" size={18} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
 
-          <Text style={coachStyles.scoreBig}>{efficiencyScore}%</Text>
-
-          <View style={coachStyles.barTrack}>
-            <View
-              style={[
-                coachStyles.barFill,
-                { width: `${efficiencyScore}%` },
-              ]}
-            />
-          </View>
-
-          <Text style={coachStyles.progressHint}>
-            Bazat pe ultimele tale sesiuni de analiză video.
-          </Text>
-        </View>
-
-        {/* ── Section 4: Quick Action CTA ────────────── */}
-        <TouchableOpacity
-          style={coachStyles.ctaBtn}
-          onPress={() => router.push('/(tabs)/camera')}
-          activeOpacity={0.85}
-        >
-          <Text style={coachStyles.ctaEmoji}>🔴</Text>
-          <Text style={coachStyles.ctaText}>Lansează Analiza Video</Text>
-          <Ionicons name="arrow-forward" size={18} color="#fff" />
-        </TouchableOpacity>
-
-        {/* ── AI Model Badge ─────────────────────────── */}
+        {/* ── AI Model Badge ───────────────────────────── */}
         <View style={coachStyles.aiBadge}>
           <View style={coachStyles.aiBadgeDot} />
           <Text style={coachStyles.aiBadgeText}>
@@ -481,13 +620,42 @@ const coachStyles = StyleSheet.create({
     borderColor: K.cardBorder,
   },
 
+  /* Quick Stats Row */
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: K.cardBorder,
+    padding: 16,
+    alignItems: 'center',
+    gap: 6,
+  },
+  statValue: {
+    color: K.accent,
+    fontSize: 28,
+    fontWeight: '900',
+    lineHeight: 32,
+  },
+  statLabel: {
+    color: K.muted,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
   /* AI Insight Card */
   insightCard: {
     borderRadius: 20,
     borderWidth: 1,
     borderColor: K.accentBorder,
     padding: 20,
-    marginBottom: 16,
+    marginBottom: 20,
     ...Platform.select({
       ios: {
         shadowColor: '#a855f7',
@@ -505,7 +673,7 @@ const coachStyles = StyleSheet.create({
     marginBottom: 12,
   },
   insightBadge: {
-    color: K.accent,
+    color: K.neon,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -540,25 +708,23 @@ const coachStyles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   scoreBig: {
-    color: K.green,
-    fontSize: 52,
+    fontSize: 56,
     fontWeight: '900',
     textAlign: 'center',
-    lineHeight: 58,
+    lineHeight: 62,
     marginBottom: 14,
   },
   barTrack: {
     width: '100%',
-    height: 10,
+    height: 12,
     backgroundColor: K.cardBorder,
-    borderRadius: 5,
+    borderRadius: 6,
     overflow: 'hidden',
     marginBottom: 12,
   },
   barFill: {
     height: '100%',
-    borderRadius: 5,
-    backgroundColor: K.green,
+    borderRadius: 6,
   },
   progressHint: {
     color: K.muted,
@@ -568,26 +734,26 @@ const coachStyles = StyleSheet.create({
 
   /* CTA Button */
   ctaBtn: {
+    marginBottom: 16,
+    borderRadius: 9999,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#a855f7',
+        shadowOpacity: 0.45,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 6 },
+      },
+      android: { elevation: 12 },
+    }),
+  },
+  ctaGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: K.accent,
-    borderRadius: 9999,
     paddingVertical: 18,
-    marginBottom: 14,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#a855f7',
-        shadowOpacity: 0.4,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 6 },
-      },
-      android: { elevation: 10 },
-    }),
-  },
-  ctaEmoji: {
-    fontSize: 18,
+    borderRadius: 9999,
   },
   ctaText: {
     color: '#fff',
@@ -611,7 +777,7 @@ const coachStyles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: K.green,
+    backgroundColor: K.neon,
   },
   aiBadgeText: {
     fontSize: 11,

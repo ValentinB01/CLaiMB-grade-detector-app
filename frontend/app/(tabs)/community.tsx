@@ -3,13 +3,19 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Modal,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { auth } from '../../firebaseConfig';
+
+const API = process.env.EXPO_PUBLIC_API_URL;
 
 const C = {
   bg: '#0f172a',
@@ -38,6 +44,51 @@ export default function CommunityScreen() {
   const [gyms, setGyms] = useState<Gym[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Witness modal
+  const [showWitnessModal, setShowWitnessModal] = useState(false);
+  const [witnessPin, setWitnessPin] = useState('');
+  const [witnessLoading, setWitnessLoading] = useState(false);
+
+  const submitWitnessPin = async () => {
+    if (witnessPin.length !== 4) {
+      Alert.alert('PIN invalid', 'Introdu un cod de 4 cifre.');
+      return;
+    }
+    setWitnessLoading(true);
+    try {
+      const raw = await AsyncStorage.getItem(`@pin_${witnessPin}`);
+      if (!raw) {
+        Alert.alert('PIN invalid', 'Codul nu a fost găsit. Verifică și încearcă din nou.');
+        setWitnessLoading(false);
+        return;
+      }
+      const { ascent_id } = JSON.parse(raw);
+      const witnessUid = auth.currentUser?.uid;
+      if (!witnessUid) {
+        Alert.alert('Eroare', 'Trebuie să fii autentificat.');
+        setWitnessLoading(false);
+        return;
+      }
+      const res = await fetch(`${API}/api/routes/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route_id: ascent_id, witness_user_id: witnessUid }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `${res.status}`);
+      }
+      await AsyncStorage.removeItem(`@pin_${witnessPin}`);
+      setShowWitnessModal(false);
+      setWitnessPin('');
+      Alert.alert('🎉 Validare reușită!', 'Urcarea prietenului tău a fost confirmată!');
+    } catch (e: any) {
+      Alert.alert('Eroare', e.message ?? 'Nu am putut valida.');
+    } finally {
+      setWitnessLoading(false);
+    }
+  };
 
   const fetchGyms = useCallback(async () => {
     try {
@@ -109,10 +160,57 @@ export default function CommunityScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Witness button */}
+          <TouchableOpacity
+            style={styles.witnessRow}
+            activeOpacity={0.75}
+            onPress={() => { setWitnessPin(''); setShowWitnessModal(true); }}
+          >
+            <Ionicons name="checkmark-circle-outline" size={20} color="#4ade80" />
+            <Text style={styles.witnessRowText}>Validează un prieten</Text>
+            <Ionicons name="chevron-forward" size={16} color={C.secondary} />
+          </TouchableOpacity>
+
           <View style={styles.container}>
             <Text style={[styles.title, styles.neonText]}>COMMUNITY</Text>
             <Text style={styles.subtitle}>Work in progress...</Text>
           </View>
+
+          {/* Witness validation modal */}
+          <Modal visible={showWitnessModal} transparent animationType="slide" onRequestClose={() => setShowWitnessModal(false)}>
+            <View style={styles.modalBg}>
+              <View style={styles.modalCard}>
+                <Ionicons name="eye-outline" size={40} color="#4ade80" style={{ alignSelf: 'center', marginBottom: 8 }} />
+                <Text style={styles.modalTitle}>Validează un prieten</Text>
+                <Text style={styles.modalSub}>Introdu codul PIN de 4 cifre</Text>
+                <TextInput
+                  style={styles.pinInput}
+                  value={witnessPin}
+                  onChangeText={(t) => setWitnessPin(t.replace(/[^0-9]/g, '').slice(0, 4))}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  placeholder="• • • •"
+                  placeholderTextColor="#475569"
+                  textAlign="center"
+                />
+                <TouchableOpacity
+                  style={[styles.confirmBtn, witnessPin.length !== 4 && { opacity: 0.5 }]}
+                  activeOpacity={0.75}
+                  disabled={witnessLoading || witnessPin.length !== 4}
+                  onPress={submitWitnessPin}
+                >
+                  {witnessLoading ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.confirmBtnText}>Confirmă Validarea</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowWitnessModal(false)} activeOpacity={0.7}>
+                  <Text style={styles.modalCancelText}>Anulează</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
         </>
       ) : loading ? (
         <View style={styles.center}>
@@ -307,4 +405,64 @@ const styles = StyleSheet.create({
     fontWeight: '300',
     marginLeft: 8,
   },
+
+  /* Witness button row */
+  witnessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: 'rgba(74,222,128,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.25)',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  witnessRowText: {
+    flex: 1,
+    color: '#4ade80',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+
+  /* Witness modal */
+  modalBg: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: C.card,
+    borderRadius: 20,
+    padding: 24,
+  },
+  modalTitle: { color: C.primary, fontSize: 22, fontWeight: '900', textAlign: 'center' },
+  modalSub: { color: C.secondary, fontSize: 14, textAlign: 'center', marginTop: 6, marginBottom: 16 },
+  pinInput: {
+    backgroundColor: C.bg,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#475569',
+    color: C.primary,
+    fontSize: 32,
+    fontWeight: '800',
+    letterSpacing: 12,
+    paddingVertical: 16,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  confirmBtn: {
+    backgroundColor: C.accent,
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  confirmBtnText: { color: '#0f172a', fontWeight: '800', fontSize: 15 },
+  modalCancelBtn: { marginTop: 14, alignItems: 'center', paddingVertical: 10 },
+  modalCancelText: { color: '#475569', fontWeight: '700', fontSize: 15 },
 });

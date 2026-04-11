@@ -39,8 +39,14 @@ async def analyze_pose(
         analysis = result.get("analysis", {})
         pose_doc = {
             "user_id": user_id,
+            "final_overall_score": analysis.get("final_overall_score", 0),
+            "consolidated_feedback": analysis.get("consolidated_feedback", ""),
             "efficiency_score": analysis.get("efficiency_score", 0),
             "feedback": analysis.get("feedback", ""),
+            "balance_score": analysis.get("balance_score", 0),
+            "balance_feedback": analysis.get("balance_feedback", ""),
+            "fluidity_score": analysis.get("fluidity_score", 0),
+            "fluidity_feedback": analysis.get("fluidity_feedback", ""),
             "total_active_frames": analysis.get("total_active_frames", 0),
             "frames_with_straight_arms": analysis.get("frames_with_straight_arms", 0),
             "video_url": result.get("video_url", ""),

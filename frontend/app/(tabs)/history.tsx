@@ -6,13 +6,15 @@ import {
   StyleSheet,
   ActivityIndicator,
   Dimensions,
+  Alert,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import Svg, { Circle } from 'react-native-svg';
 import { LineChart } from 'react-native-chart-kit';
-import { fetchPoseHistory, PoseRecord } from '../../utils/api';
+import { fetchPoseHistory, deletePoseHistory, PoseRecord } from '../../utils/api';
 
 const C = {
   bg: '#09090b',
@@ -112,7 +114,7 @@ function EvolutionChart({ records }: { records: PoseRecord[] }) {
       labels: sorted.map(r => formatShortDate(r.analyzed_at)),
       datasets: [
         {
-          data: sorted.map(r => r.efficiency_score),
+          data: sorted.map(r => r.final_overall_score),
           strokeWidth: 2.5,
         },
       ],
@@ -186,6 +188,28 @@ export default function VaultScreen() {
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
+  const handleDelete = useCallback((id: string) => {
+    Alert.alert(
+      'Șterge Analiza',
+      'Ești sigur că vrei să ștergi definitiv acest raport din istoric?',
+      [
+        { text: 'Anulează', style: 'cancel' },
+        {
+          text: 'Șterge',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deletePoseHistory(id);
+              setRecords(prev => prev.filter(item => item.id !== id));
+            } catch {
+              Alert.alert('Eroare', 'Nu am putut șterge analiza. Încearcă din nou.');
+            }
+          },
+        },
+      ]
+    );
+  }, []);
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -228,13 +252,22 @@ export default function VaultScreen() {
           showsVerticalScrollIndicator={false}
           ListHeaderComponent={<EvolutionChart records={records} />}
           renderItem={({ item }) => {
-            const color = scoreColor(item.efficiency_score);
+            const overallColor = scoreColor(item.final_overall_score);
 
             return (
               <View style={styles.card} testID={`vault-card-${item.id}`}>
+                {/* Delete button */}
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => handleDelete(item.id)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="trash-outline" size={18} color={C.muted} />
+                </TouchableOpacity>
+
                 {/* Top row: ring + date */}
                 <View style={styles.cardTop}>
-                  <EfficiencyRing score={item.efficiency_score} />
+                  <EfficiencyRing score={item.final_overall_score} />
 
                   <View style={styles.cardInfo}>
                     <Text style={styles.cardTitle}>Analiza Video</Text>
@@ -246,9 +279,9 @@ export default function VaultScreen() {
                         <Ionicons name="videocam-outline" size={11} color={C.muted} />
                         <Text style={styles.chipText}>{item.total_active_frames} cadre</Text>
                       </View>
-                      <View style={[styles.chip, { borderColor: color + '44' }]}>
-                        <Ionicons name="fitness-outline" size={11} color={color} />
-                        <Text style={[styles.chipText, { color }]}>
+                      <View style={[styles.chip, { borderColor: overallColor + '44' }]}>
+                        <Ionicons name="fitness-outline" size={11} color={overallColor} />
+                        <Text style={[styles.chipText, { color: overallColor }]}>
                           {item.frames_with_straight_arms}/{item.total_active_frames} eficiente
                         </Text>
                       </View>
@@ -256,12 +289,27 @@ export default function VaultScreen() {
                   </View>
                 </View>
 
-                {/* Feedback preview */}
-                {item.feedback ? (
+                {/* Sub-score indicators */}
+                <View style={styles.subScoreRow}>
+                  <Text style={[styles.subScoreItem, { color: scoreColor(item.efficiency_score) }]}>
+                    B: {item.efficiency_score}%
+                  </Text>
+                  <Text style={styles.subScoreSep}>|</Text>
+                  <Text style={[styles.subScoreItem, { color: scoreColor(item.balance_score) }]}>
+                    E: {item.balance_score}%
+                  </Text>
+                  <Text style={styles.subScoreSep}>|</Text>
+                  <Text style={[styles.subScoreItem, { color: scoreColor(item.fluidity_score) }]}>
+                    F: {item.fluidity_score}%
+                  </Text>
+                </View>
+
+                {/* Consolidated feedback */}
+                {item.consolidated_feedback ? (
                   <View style={styles.feedbackWrap}>
                     <Ionicons name="sparkles" size={13} color={C.accent} />
-                    <Text style={styles.feedbackText} numberOfLines={3}>
-                      {item.feedback}
+                    <Text style={styles.feedbackText} numberOfLines={4}>
+                      {item.consolidated_feedback}
                     </Text>
                   </View>
                 ) : null}
@@ -330,6 +378,36 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   feedbackText: { fontSize: 12, color: C.secondary, lineHeight: 18, flex: 1 },
+
+  /* Sub-scores */
+  subScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingVertical: 6,
+    backgroundColor: C.cardHighlight,
+    borderRadius: 10,
+  },
+  subScoreItem: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  subScoreSep: {
+    fontSize: 12,
+    color: C.muted,
+  },
+
+  /* Delete button */
+  deleteBtn: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 10,
+    padding: 4,
+    borderRadius: 8,
+  },
 
   /* Chart */
   chartCard: {

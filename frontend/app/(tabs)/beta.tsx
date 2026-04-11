@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,15 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  FlatList,
   TextInput,
   Platform,
   Keyboard,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { askCoach, ChatMessagePayload } from '../../utils/api';
 
 /* ── Types ───────────────────────────────────────────────── */
 type ActiveTab = 'ai' | 'local';
@@ -37,26 +40,16 @@ const C = {
 /* ── Quick-suggest chips ─────────────────────────────────── */
 const QUICK_CHIPS = ['Heel Hook', 'Drop Knee', 'Dyno', 'Crimp', 'Flagging'];
 
-/* ── Mock AI responses per technique ─────────────────────── */
-const TECHNIQUE_RESPONSES: Record<string, string> = {
-  'Heel Hook':
-    'Heel Hook: Plasează călcâiul pe o priză și trage activ cu posteriorul piciorului. Ține centrul de greutate aproape de perete și evită să te bazezi doar pe brațe — lasă piciorul să facă treaba grea.',
-  'Drop Knee':
-    'Drop Knee: Rotește genunchiul interior în jos și pivotează pe șoldul opus. Acest lucru generează torque și îți permite să ajungi mai departe pe prize laterale fără a folosi forță suplimentară din brațe.',
-  Dyno: 'Dyno: Pregătește-te cu o mișcare de balans din picioare, apoi explodează coordonat cu tot corpul. Țintește cu privirea priza finală înainte de a sări și încearcă să prinzi cu ambele mâini simultan.',
-  Crimp:
-    'Crimp: Închide degetele strâns pe priză cu prima falangă hiperextinsă. Folosește crimp-ul cu jumătate de prindere (half-crimp) pentru a proteja tendoanele. Nu uita: precizia picioarelor reduce 80% din presiunea pe degete.',
-  Flagging:
-    'Flagging: Întinde un picior în lateral sau în spate fără a-l plasa pe o priză, pentru a contracara efectul de barn-door. Flagging-ul inside se face pe același perete, iar outside — pe peretele opus direcției mișcării.',
-};
+/* ── Chat message type ──────────────────────────────────── */
+interface ChatMsg {
+  role: 'user' | 'model';
+  text: string;
+}
 
-/* ── Generic mock responses (for free-text queries) ──────── */
-const GENERIC_RESPONSES = [
-  'Pentru prizele de tip sloper, încearcă să îți ții centrul de greutate cât mai jos și folosește palma completă pentru frecare maximă.',
-  'Când te confrunți cu un overhang, menține brațele întinse cât mai mult posibil pentru a economisi energie și mută-ți șoldurile aproape de perete.',
-  'Pe traseele cu prize mici (crimps), concentrează-te pe precizia picioarelor — 80% din putere ar trebui să vină de la picioare, nu de la brațe.',
-  'La secțiunile tehnice, vizualizează întreaga secvență de mișcări înainte de a începe. Cititul traseului îți salvează timp și energie.',
-];
+const WELCOME_MESSAGE: ChatMsg = {
+  role: 'model',
+  text: 'Salut! Sunt AI Coach-ul tău. Cu ce tehnică te pot ajuta azi?',
+};
 
 /* ── Local: Technique videos placeholder ─────────────────── */
 const LOCAL_TECHNIQUES = [
@@ -79,127 +72,154 @@ export default function BetaScreen() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('ai');
   const [localSubTab, setLocalSubTab] = useState<LocalSubTab>('techniques');
 
-  // AI state
-  const [query, setQuery] = useState('');
+  // AI Chat state
+  const [messages, setMessages] = useState<ChatMsg[]>([WELCOME_MESSAGE]);
+  const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [aiResponse, setAiResponse] = useState<string | null>(null);
 
+  const flatListRef = useRef<FlatList>(null);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Auto-scroll chat to bottom when messages change
+  useEffect(() => {
+    if (flatListRef.current && messages.length > 0) {
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  }, [messages]);
 
   /* ── AI: send handler ──────────────────────────────────── */
   const handleSend = useCallback(
-    (text?: string) => {
-      const msg = (text ?? query).trim();
+    async (text?: string) => {
+      const msg = (text ?? inputText).trim();
       if (!msg || isLoading) return;
       Keyboard.dismiss();
-      setQuery(msg);
+
+      const userMsg: ChatMsg = { role: 'user', text: msg };
+      const updatedMessages = [...messages, userMsg];
+
+      setMessages(updatedMessages);
+      setInputText('');
       setIsLoading(true);
-      setAiResponse(null);
 
-      // Check if message matches a known technique
-      const matchedKey = Object.keys(TECHNIQUE_RESPONSES).find((k) =>
-        msg.toLowerCase().includes(k.toLowerCase()),
-      );
+      try {
+        const payload: ChatMessagePayload[] = updatedMessages
+          .filter((m) => m !== WELCOME_MESSAGE || updatedMessages.indexOf(m) !== 0)
+          .map((m) => ({ role: m.role, text: m.text }));
 
-      setTimeout(() => {
-        if (matchedKey) {
-          setAiResponse(
-            TECHNIQUE_RESPONSES[matchedKey] +
-              '\n\nAi întrebări despre cum să o aplici?',
-          );
-        } else {
-          const idx = Math.floor(Math.random() * GENERIC_RESPONSES.length);
-          setAiResponse(
-            GENERIC_RESPONSES[idx] + '\n\nAi întrebări despre cum să o aplici?',
-          );
-        }
+        const data = await askCoach({ messages: payload });
+        const modelMsg: ChatMsg = { role: 'model', text: data.reply };
+        setMessages((prev) => [...prev, modelMsg]);
+      } catch (err: any) {
+        const errorMsg: ChatMsg = {
+          role: 'model',
+          text: 'Oops, nu am putut comunica cu serverul. Încearcă din nou.',
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+      } finally {
         setIsLoading(false);
-      }, 1500);
+      }
     },
-    [query, isLoading],
+    [inputText, isLoading, messages],
   );
 
   /* ── Quick chip tap ────────────────────────────────────── */
   const handleChipTap = (name: string) => {
     const prompt = `Explică-mi tehnica: ${name}`;
-    setQuery(prompt);
     handleSend(prompt);
+  };
+
+  /* ── Render: single chat bubble ───────────────────────── */
+  const renderBubble = ({ item }: { item: ChatMsg }) => {
+    const isUser = item.role === 'user';
+    return (
+      <View style={[s.bubbleRow, isUser ? s.bubbleRowUser : s.bubbleRowModel]}>
+        {!isUser && (
+          <View style={s.avatarWrap}>
+            <Ionicons name="sparkles" size={14} color={C.accent} />
+          </View>
+        )}
+        <View style={[s.bubble, isUser ? s.bubbleUser : s.bubbleModel]}>
+          <Text style={[s.bubbleText, isUser && s.bubbleTextUser]}>{item.text}</Text>
+        </View>
+      </View>
+    );
   };
 
   /* ── Render: AI Coach ──────────────────────────────────── */
   const renderAICoach = () => (
-    <>
-      {/* Header */}
-      <View style={s.headerWrap}>
-        <Ionicons name="sparkles" size={28} color={C.accent} />
-        <Text style={s.title}>AI Beta Coach</Text>
-      </View>
-      <Text style={s.subtitle}>
-        Alege o tehnică rapidă sau descrie problema ta de pe traseu.
-      </Text>
-
+    <KeyboardAvoidingView
+      style={s.chatContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       {/* Quick Chips */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={s.chipRow}
-        style={s.chipScroll}
-      >
-        {QUICK_CHIPS.map((name) => (
-          <TouchableOpacity
-            key={name}
-            style={s.chip}
-            onPress={() => handleChipTap(name)}
-            activeOpacity={0.75}
-            disabled={isLoading}
-          >
-            <Ionicons name="flash-outline" size={14} color={C.accent} />
-            <Text style={s.chipText}>{name}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={s.chipsBar}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.chipRow}
+        >
+          {QUICK_CHIPS.map((name) => (
+            <TouchableOpacity
+              key={name}
+              style={s.chip}
+              onPress={() => handleChipTap(name)}
+              activeOpacity={0.75}
+              disabled={isLoading}
+            >
+              <Ionicons name="flash-outline" size={14} color={C.accent} />
+              <Text style={s.chipText}>{name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
 
-      {/* Input Card */}
-      <View style={s.inputCard}>
+      {/* Chat Messages */}
+      <FlatList
+        ref={flatListRef}
+        data={messages}
+        renderItem={renderBubble}
+        keyExtractor={(_, idx) => String(idx)}
+        contentContainerStyle={s.chatList}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        ListFooterComponent={
+          isLoading ? (
+            <View style={[s.bubbleRow, s.bubbleRowModel]}>
+              <View style={s.avatarWrap}>
+                <Ionicons name="sparkles" size={14} color={C.accent} />
+              </View>
+              <View style={[s.bubble, s.bubbleModel]}>
+                <ActivityIndicator size="small" color={C.accent} />
+                <Text style={[s.bubbleText, { marginLeft: 8 }]}>AI Coach scrie...</Text>
+              </View>
+            </View>
+          ) : null
+        }
+      />
+
+      {/* Input Bar */}
+      <View style={s.inputBar}>
         <TextInput
-          style={s.textInput}
-          placeholder="Ex: Nu reușesc să țin sloperii pe overhang..."
+          style={s.chatInput}
+          placeholder="Scrie un mesaj..."
           placeholderTextColor={C.muted}
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-          value={query}
-          onChangeText={setQuery}
+          value={inputText}
+          onChangeText={setInputText}
           editable={!isLoading}
+          multiline
+          maxLength={1000}
         />
         <TouchableOpacity
-          style={[s.sendBtn, (!query.trim() || isLoading) && s.sendBtnDisabled]}
+          style={[s.sendCircle, (!inputText.trim() || isLoading) && s.sendCircleDisabled]}
           onPress={() => handleSend()}
           activeOpacity={0.8}
-          disabled={!query.trim() || isLoading}
+          disabled={!inputText.trim() || isLoading}
         >
-          {isLoading ? (
-            <ActivityIndicator color="#0d0d12" size="small" />
-          ) : (
-            <Ionicons name="send" size={18} color="#0d0d12" />
-          )}
-          <Text style={s.sendBtnText}>
-            {isLoading ? 'Se gândește...' : 'Trimite'}
-          </Text>
+          <Ionicons name="send" size={20} color="#0d0d12" />
         </TouchableOpacity>
       </View>
-
-      {/* AI Response */}
-      {aiResponse && (
-        <View style={s.responseCard}>
-          <View style={s.responseHeader}>
-            <Ionicons name="sparkles" size={18} color={C.accent} />
-            <Text style={s.responseLabel}>Răspuns AI Coach</Text>
-          </View>
-          <Text style={s.responseText}>{aiResponse}</Text>
-        </View>
-      )}
-    </>
+    </KeyboardAvoidingView>
   );
 
   /* ── Render: Local ─────────────────────────────────────── */
@@ -286,12 +306,6 @@ export default function BetaScreen() {
     </>
   );
 
-  /* ── Content map ───────────────────────────────────────── */
-  const CONTENT: Record<ActiveTab, () => React.JSX.Element> = {
-    ai: renderAICoach,
-    local: renderLocal,
-  };
-
   /* ── Main render ───────────────────────────────────────── */
   return (
     <SafeAreaView style={s.container}>
@@ -318,15 +332,19 @@ export default function BetaScreen() {
         })}
       </View>
 
-      {/* ── Scrollable Content ───────────────────────────── */}
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={s.scroll}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {CONTENT[activeTab]()}
-      </ScrollView>
+      {/* ── Content ──────────────────────────────────────── */}
+      {activeTab === 'ai' ? (
+        renderAICoach()
+      ) : (
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={s.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {renderLocal()}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -407,13 +425,17 @@ const s = StyleSheet.create({
     marginBottom: 18,
   },
 
-  /* ── Quick Chips ── */
-  chipScroll: {
-    marginBottom: 16,
-    marginHorizontal: -20,
+  /* ── Chat Layout ── */
+  chatContainer: {
+    flex: 1,
+  },
+  chipsBar: {
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.cardBorder,
   },
   chipRow: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     gap: 10,
   },
   chip: {
@@ -432,90 +454,97 @@ const s = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  chatList: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 8,
+  },
 
-  /* ── Input Card ── */
-  inputCard: {
+  /* ── Chat Bubbles ── */
+  bubbleRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+    alignItems: 'flex-end',
+  },
+  bubbleRowUser: {
+    justifyContent: 'flex-end',
+  },
+  bubbleRowModel: {
+    justifyContent: 'flex-start',
+  },
+  avatarWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: C.accentDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: C.accentBorder,
+  },
+  bubble: {
+    maxWidth: '78%',
+    borderRadius: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  bubbleUser: {
+    backgroundColor: '#7c3aed',
+    borderBottomRightRadius: 4,
+  },
+  bubbleModel: {
     backgroundColor: C.card,
-    borderRadius: 20,
+    borderBottomLeftRadius: 4,
     borderWidth: 1,
     borderColor: C.cardBorder,
-    padding: 16,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-        shadowOffset: { width: 0, height: 6 },
-      },
-      android: { elevation: 6 },
-    }),
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
   },
-  textInput: {
+  bubbleText: {
+    color: C.primary,
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  bubbleTextUser: {
+    color: '#fff',
+  },
+
+  /* ── Input Bar ── */
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: C.cardBorder,
+    backgroundColor: C.bg,
+    gap: 10,
+  },
+  chatInput: {
+    flex: 1,
     backgroundColor: C.inputBg,
-    borderRadius: 14,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: C.cardBorder,
     color: C.primary,
     fontSize: 15,
     lineHeight: 22,
-    padding: 14,
-    minHeight: 100,
-    marginBottom: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxHeight: 100,
   },
-  sendBtn: {
-    flexDirection: 'row',
+  sendCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: C.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    backgroundColor: C.accent,
-    borderRadius: 9999,
-    paddingVertical: 14,
   },
-  sendBtnDisabled: {
-    opacity: 0.45,
-  },
-  sendBtnText: {
-    color: '#0d0d12',
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-
-  /* ── AI Response Card ── */
-  responseCard: {
-    backgroundColor: 'rgba(24,24,27,0.92)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.accentBorder,
-    padding: 18,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#a855f7',
-        shadowOpacity: 0.15,
-        shadowRadius: 18,
-        shadowOffset: { width: 0, height: 6 },
-      },
-      android: { elevation: 8 },
-    }),
-  },
-  responseHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  responseLabel: {
-    color: C.accent,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
-  responseText: {
-    color: C.primary,
-    fontSize: 15,
-    lineHeight: 23,
+  sendCircleDisabled: {
+    opacity: 0.4,
   },
 
   /* ── Local Sub-Bar ── */

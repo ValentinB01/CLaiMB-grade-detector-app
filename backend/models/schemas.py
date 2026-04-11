@@ -15,12 +15,25 @@ class AscentStyle(str, Enum):
     ZONE = "Zone"           
     ATTEMPT = "Attempt"     
 
+class Progression(str, Enum):
+    ZONE = "zone"
+    TOP = "top"
+    FLASH = "flash"
+
+class VerifiedStatus(str, Enum):
+    UNVERIFIED = "unverified"
+    PEER_VERIFIED = "peer_verified"
+    AI_VERIFIED = "ai_verified"
+
 class UserProfile(BaseModel):
     uid: str = Field(..., description="Firebase UID")
     email: str
     display_name: str
     is_pro: bool = Field(default=False, description="Dacă are acces la CLaiMB Coach")
     home_gym_id: Optional[str] = Field(default=None, description="Sala preferată în Community")
+    city: Optional[str] = Field(default=None, description="Orașul utilizatorului")
+    country: Optional[str] = Field(default=None, description="Țara utilizatorului")
+    total_points: int = Field(default=0, description="Punctajul total acumulat în Arena")
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 class Gym(BaseModel):
@@ -47,6 +60,10 @@ class Ascent(BaseModel):
     gym_id: str
     route_id: str
     style: AscentStyle
+    grade: Optional[str] = Field(default=None, description="Gradul traseului (ex: Galben, Verde, Albastru, Negru)")
+    progression: Progression = Field(default=Progression.TOP, description="Nivelul de completare")
+    verified_status: VerifiedStatus = Field(default=VerifiedStatus.UNVERIFIED, description="Statusul de validare")
+    witness_id: Optional[str] = Field(default=None, description="UID-ul martorului care validează")
     points_awarded: int = 0
     date: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
@@ -138,8 +155,14 @@ class GradeSelectionResponse(BaseModel):
 class PoseRecord(BaseModel):
     id: Optional[str] = None
     user_id: str = "guest"
+    final_overall_score: float = 0.0
+    consolidated_feedback: str = ""
     efficiency_score: float = 0.0
     feedback: str = ""
+    balance_score: float = 0.0
+    balance_feedback: str = ""
+    fluidity_score: float = 0.0
+    fluidity_feedback: str = ""
     total_active_frames: int = 0
     frames_with_straight_arms: int = 0
     video_url: Optional[str] = None
@@ -150,18 +173,16 @@ class PoseHistoryResponse(BaseModel):
     total: int = 0
 
 class ChatMessage(BaseModel):
-    role: str = Field(..., description="'user' or 'coach'")
+    role: str = Field(..., description="'user' or 'model'")
     text: str
 
 class ChatRequest(BaseModel):
-    image_base64: str
-    holds: List[HoldLocation]
-    prompt: str
-    history: List[ChatMessage] = Field(default_factory=list)
-    wall_angle: Optional[str] = "vertical"
-    gym_id: Optional[str] = None
-    user_id: Optional[str] = "guest"
+    messages: List[ChatMessage]
 
 class ChatResponse(BaseModel):
     reply: str
     processed_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+class VerifyRouteRequest(BaseModel):
+    route_id: str = Field(..., description="ID-ul urcării (ascent) de verificat")
+    witness_user_id: str = Field(..., description="UID-ul martorului care confirmă urcarea")

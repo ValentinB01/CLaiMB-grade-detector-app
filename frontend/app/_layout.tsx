@@ -59,6 +59,7 @@ export default function RootLayout() {
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#09090b' } }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="result" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+          <Stack.Screen name="gym/[id]" options={{ headerShown: false, presentation: 'card' }} />
         </Stack>
       ) : (
         // Dacă NU avem user, arătăm direct ecranul de Login pe tot ecranul

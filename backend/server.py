@@ -20,6 +20,8 @@ from routes.community import router as community_router
 from routes.analysis import router as analysis_router
 from routes.history import router as history_router
 from routes.pose import router as pose_router
+from routes.chat import router as chat_router
+from routes.arena import router as arena_router
 
 # ---------------------------------------------------------------------------
 # 1. Definire Lifespan (Gestionare conexiune MongoDB)
@@ -71,6 +73,10 @@ app.include_router(community_router, prefix="/community", tags=["Community"])
 app.include_router(analysis_router, prefix="/api", tags=["Analysis"])
 app.include_router(history_router, prefix="/api", tags=["History"])
 app.include_router(pose_router, prefix="/api", tags=["Pose"])
+app.include_router(chat_router, prefix="/api", tags=["Chat"])
+
+# --- D. Rute Arena (Leaderboard Nou & Verificare) ---
+app.include_router(arena_router, prefix="/api", tags=["Arena"])
 
 
 # ---------------------------------------------------------------------------

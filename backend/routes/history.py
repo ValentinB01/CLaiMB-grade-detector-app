@@ -1,7 +1,8 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from bson import ObjectId
+from fastapi import APIRouter, HTTPException, Query
 from models.schemas import RouteRecord, RouteHistoryResponse, PoseRecord, PoseHistoryResponse
 from database import db
 
@@ -75,8 +76,14 @@ async def get_pose_history(user_id: str):
         records.append(PoseRecord(
             id=str(doc["_id"]),
             user_id=doc.get("user_id", "guest"),
+            final_overall_score=doc.get("final_overall_score", 0),
+            consolidated_feedback=doc.get("consolidated_feedback", ""),
             efficiency_score=doc.get("efficiency_score", 0),
             feedback=doc.get("feedback", ""),
+            balance_score=doc.get("balance_score", 0),
+            balance_feedback=doc.get("balance_feedback", ""),
+            fluidity_score=doc.get("fluidity_score", 0),
+            fluidity_feedback=doc.get("fluidity_feedback", ""),
             total_active_frames=doc.get("total_active_frames", 0),
             frames_with_straight_arms=doc.get("frames_with_straight_arms", 0),
             video_url=doc.get("video_url"),
@@ -84,3 +91,14 @@ async def get_pose_history(user_id: str):
         ))
 
     return {"records": records, "total": len(records)}
+
+
+@router.delete("/pose-history/{analysis_id}")
+async def delete_pose_history_entry(analysis_id: str, user_id: str):
+    """Delete a single pose analysis from the Vault by its MongoDB _id."""
+    result = await db.db.pose_history.delete_one(
+        {"_id": ObjectId(analysis_id), "user_id": user_id}
+    )
+    if result.deleted_count == 1:
+        return {"message": "Analiza a fost ștearsă"}
+    raise HTTPException(status_code=404, detail="Analiza nu a fost găsită")

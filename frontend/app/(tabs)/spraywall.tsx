@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Alert,
   Platform,
   LayoutChangeEvent,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
@@ -36,6 +37,35 @@ const C = {
   danger: '#ef4444',
 };
 
+/* ── Hold roles ────────────────────────────────────────────── */
+type HoldRole = 'start' | 'hand' | 'finish';
+const ROLE_COLORS: Record<HoldRole, string> = {
+  start: C.electric,
+  hand: C.neon,
+  finish: C.danger,
+};
+const ROLE_LABELS: Record<HoldRole, string> = {
+  start: 'START',
+  hand: 'HAND',
+  finish: 'FINISH',
+};
+const ROLE_CYCLE: (HoldRole | null)[] = [null, 'start', 'hand', 'finish', null];
+const MIN_HOLDS = 4;
+const MAX_HOLDS = 15;
+const REACH_RADIUS = 0.25;
+const REACH_RADIUS_WIDE = 0.35;
+const START_CLUSTER_DIST = 0.15;
+const ZIGZAG_DOWN = 0.05;
+const ZIGZAG_DOWN_WIDE = 0.08;
+const FINISH_ZONE_Y = 0.15;
+const START_ZONE_Y = 0.75;
+
+interface EvaluationResult {
+  grade: string;
+  reasoning: string;
+  difficultyScore: number;
+}
+
 /* ── Component ─────────────────────────────────────────────── */
 export default function SpraywallScreen() {
   // Image & analysis state
@@ -46,7 +76,28 @@ export default function SpraywallScreen() {
   const [imgLayout, setImgLayout] = useState({ width: 0, height: 0 });
 
   // Route builder state
-  const [selectedHolds, setSelectedHolds] = useState<number[]>([]);
+  const [selectedHolds, setSelectedHolds] = useState<Record<number, HoldRole>>({});
+
+  // Evaluation state
+  const [evaluationResult, setEvaluationResult] = useState<EvaluationResult | null>(null);
+  const insightAnim = useRef(new Animated.Value(0)).current;
+
+  // Clear evaluation when route changes
+  useEffect(() => {
+    setEvaluationResult(null);
+  }, [selectedHolds]);
+
+  // Animate insights card on new evaluation
+  useEffect(() => {
+    if (evaluationResult) {
+      insightAnim.setValue(0);
+      Animated.timing(insightAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [evaluationResult]);
 
   /* ── Pick image & detect holds ───────────────────────────── */
   const pickAndAnalyze = async () => {
@@ -66,7 +117,7 @@ export default function SpraywallScreen() {
 
       const base64 = result.assets[0].base64;
       setImageBase64(base64);
-      setSelectedHolds([]);
+      setSelectedHolds({});
 
       const response = await detectHolds({
         image_base64: base64,
@@ -86,52 +137,260 @@ export default function SpraywallScreen() {
     setImgLayout({ width, height });
   }, []);
 
-  /* ── Toggle hold selection ───────────────────────────────── */
+  /* ── Toggle hold selection (cycle: start → hand → finish → off) */
   const toggleHold = (idx: number) => {
-    setSelectedHolds((prev) =>
-      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx],
-    );
+    setSelectedHolds((prev) => {
+      const current = prev[idx] ?? null;
+      const nextIdx = ROLE_CYCLE.indexOf(current) + 1;
+      const next = ROLE_CYCLE[nextIdx] ?? null;
+
+      if (next === null) {
+        const { [idx]: _, ...rest } = prev;
+        return rest;
+      }
+
+      if (!(idx in prev) && Object.keys(prev).length >= MAX_HOLDS) {
+        Alert.alert('Limită atinsă', `Maxim ${MAX_HOLDS} prize per traseu.`);
+        return prev;
+      }
+
+      return { ...prev, [idx]: next };
+    });
   };
 
-  /* ── AI Route Generator ──────────────────────────────────── */
+  /* ── AI Route Generator (Reachability + Zig-Zag) ───────── */
   const generateRandomRoute = () => {
-    if (holds.length < 3) {
-      Alert.alert('Not enough holds', 'Need at least 3 detected holds to generate a route.');
+    if (holds.length < 7) {
+      Alert.alert('Prea puține prize', 'Sunt necesare minim 7 prize detectate.');
       return;
     }
 
-    // Sort by Y (top of image = 0, bottom = 1)
     const indexed = holds.map((h, i) => ({ ...h, idx: i }));
-    indexed.sort((a, b) => a.y - b.y);
+    const eucl = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 
-    const total = indexed.length;
-    const topZone = indexed.slice(0, Math.max(1, Math.floor(total * 0.25)));
-    const midZone = indexed.slice(
-      Math.floor(total * 0.25),
-      Math.floor(total * 0.75),
-    );
-    const bottomZone = indexed.slice(Math.floor(total * 0.75));
+    // Target route length: 7–10 holds
+    const targetLength = Math.floor(Math.random() * 4) + 7;
 
-    const pick = (arr: typeof indexed, n: number) => {
-      const shuffled = [...arr].sort(() => Math.random() - 0.5);
-      return shuffled.slice(0, Math.min(n, shuffled.length));
-    };
+    // 1. Start clustering — bottom 25 %
+    const bottomPool = indexed.filter((h) => h.y >= START_ZONE_Y);
+    if (bottomPool.length < 1) {
+      Alert.alert('Zone insuficiente', 'Nu sunt destule prize în zona de start.');
+      return;
+    }
 
-    const finish = pick(topZone, 1);
-    const middle = pick(midZone, Math.min(midZone.length, 3 + Math.floor(Math.random() * 2)));
-    const start = pick(bottomZone, Math.min(bottomZone.length, 2));
+    const route: Record<number, HoldRole> = {};
+    const used = new Set<number>();
 
-    const route = [...finish, ...middle, ...start].map((h) => h.idx);
-    const unique = [...new Set(route)];
+    // Start Hold 1: random from bottom
+    const start1 = bottomPool[Math.floor(Math.random() * bottomPool.length)];
+    route[start1.idx] = 'start';
+    used.add(start1.idx);
 
-    setSelectedHolds(unique);
+    // Start Hold 2: closest neighbour within START_CLUSTER_DIST
+    const s2Candidates = bottomPool
+      .filter((h) => h.idx !== start1.idx)
+      .sort((a, b) => eucl(a, start1) - eucl(b, start1));
+
+    if (s2Candidates.length > 0 && eucl(s2Candidates[0], start1) < START_CLUSTER_DIST) {
+      route[s2Candidates[0].idx] = 'start';
+      used.add(s2Candidates[0].idx);
+    }
+
+    // 2. Build zig-zag chain toward the top
+    const startIdxs = Object.keys(route).map(Number);
+    let current = startIdxs
+      .map((i) => indexed[i])
+      .reduce((a, b) => (a.y < b.y ? a : b));
+
+    const handTarget = targetLength - 1; // leave 1 slot for finish
+
+    while (Object.keys(route).length < handTarget) {
+      // Normal search: allow slight downward (zig-zag)
+      let candidates = indexed.filter((h) => {
+        if (used.has(h.idx)) return false;
+        if (h.y > current.y + ZIGZAG_DOWN) return false;
+        const d = eucl(h, current);
+        return d > 0.04 && d <= REACH_RADIUS;
+      });
+
+      // Fallback: widen radius & downward tolerance
+      if (candidates.length === 0) {
+        candidates = indexed.filter((h) => {
+          if (used.has(h.idx)) return false;
+          if (h.y > current.y + ZIGZAG_DOWN_WIDE) return false;
+          const d = eucl(h, current);
+          return d > 0.04 && d <= REACH_RADIUS_WIDE;
+        });
+      }
+
+      if (candidates.length === 0) break;
+
+      // Score: reward upward movement + random lateral variation
+      candidates.sort((a, b) => {
+        const sa = a.y - Math.random() * 0.08;
+        const sb = b.y - Math.random() * 0.08;
+        return sa - sb;
+      });
+
+      const pool = candidates.slice(
+        0,
+        Math.max(1, Math.ceil(candidates.length * 0.6)),
+      );
+      const next = pool[Math.floor(Math.random() * pool.length)];
+
+      route[next.idx] = 'hand';
+      used.add(next.idx);
+      current = next;
+    }
+
+    // 3. Finish — prefer top 15 %, fallback to highest unused
+    const finishPool = indexed
+      .filter((h) => !used.has(h.idx) && h.y <= FINISH_ZONE_Y)
+      .sort((a, b) => eucl(a, current) - eucl(b, current));
+
+    if (finishPool.length > 0) {
+      const reachable = finishPool.filter(
+        (h) => eucl(h, current) <= REACH_RADIUS_WIDE,
+      );
+      const pick = reachable.length > 0 ? reachable[0] : finishPool[0];
+      route[pick.idx] = 'finish';
+    } else {
+      // Fallback: absolute highest unused hold
+      const highest = indexed
+        .filter((h) => !used.has(h.idx))
+        .sort((a, b) => a.y - b.y);
+      if (highest.length > 0) route[highest[0].idx] = 'finish';
+    }
+
+    if (Object.keys(route).length < MIN_HOLDS) {
+      Alert.alert(
+        'Rută incompletă',
+        'Nu s-a putut genera o rută cu suficiente prize accesibile. Încearcă din nou.',
+      );
+      return;
+    }
+
+    setSelectedHolds(route);
   };
 
-  const clearRoute = () => setSelectedHolds([]);
+  const clearRoute = () => setSelectedHolds({});
+
+  /* ── Crux-based Route Grader ──────────────────────────────── */
+  const estimateRouteGrade = () => {
+    const indices = Object.keys(selectedHolds).map(Number);
+    if (indices.length < MIN_HOLDS) return;
+
+    // 1. Chronological sequence: Start (bottom) → Finish (top)
+    const chain = indices
+      .map((i) => ({ ...holds[i], idx: i }))
+      .sort((a, b) => b.y - a.y);
+
+    // 2. Crux Reach — longest single move
+    let maxDist = 0;
+    let cruxMoveIdx = 0;
+    const distances: number[] = [];
+    for (let i = 1; i < chain.length; i++) {
+      const dx = chain[i].x - chain[i - 1].x;
+      const dy = chain[i].y - chain[i - 1].y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      distances.push(d);
+      if (d > maxDist) {
+        maxDist = d;
+        cruxMoveIdx = i;
+      }
+    }
+
+    // 3. Crux Hold — smallest hold in route
+    let minArea = Infinity;
+    let cruxHoldIdx = 0;
+    const areas: number[] = [];
+    for (let i = 0; i < chain.length; i++) {
+      const w = chain[i].width ?? chain[i].radius * 2;
+      const h = chain[i].height ?? chain[i].radius * 2;
+      const area = w * h;
+      areas.push(area);
+      if (area < minArea) {
+        minArea = area;
+        cruxHoldIdx = i;
+      }
+    }
+
+    // 4. Base score (0–100) from crux extremes
+    //    maxDist typically 0.05–0.50 normalised → map to 0–50
+    //    minArea typically 0.0002–0.04 normalised → invert & map to 0–50
+    const WEIGHT_REACH = 50;
+    const WEIGHT_HOLD = 50;
+    const reachScore = Math.min(maxDist / 0.45, 1) * WEIGHT_REACH;
+    const holdScore = (1 - Math.min(minArea / 0.03, 1)) * WEIGHT_HOLD;
+    let score = reachScore + holdScore;
+
+    // 5. Modifiers
+    // Endurance: long routes tire you out
+    const enduranceBonus = chain.length > 10
+      ? Math.min((chain.length - 10) * 1.5, 8)
+      : 0;
+    score += enduranceBonus;
+
+    // Traverse: large lateral moves with little vertical progress
+    let traverseBonus = 0;
+    for (let i = 1; i < chain.length; i++) {
+      const lateralDx = Math.abs(chain[i].x - chain[i - 1].x);
+      const verticalDy = Math.abs(chain[i].y - chain[i - 1].y);
+      if (lateralDx > 0.15 && verticalDy < 0.05) {
+        traverseBonus += 3;
+      }
+    }
+    traverseBonus = Math.min(traverseBonus, 10);
+    score += traverseBonus;
+
+    // Clamp final score 0–100
+    score = Math.max(0, Math.min(Math.round(score), 100));
+
+    // 6. V-Scale mapping (0–100 → V0–V10)
+    const V_THRESHOLDS = [15, 25, 35, 44, 52, 60, 68, 76, 84, 92];
+    let grade = 0;
+    for (let i = 0; i < V_THRESHOLDS.length; i++) {
+      if (score >= V_THRESHOLDS[i]) grade = i + 1;
+    }
+    const vGrade = `V${grade}`;
+
+    // 7. Dynamic reasoning — identify dominant crux factor
+    const reachDominant = reachScore >= holdScore;
+    let reasoning: string;
+
+    if (reachDominant) {
+      reasoning =
+        `🔥 Crux-ul traseului este o mișcare ${maxDist > 0.30 ? 'foarte lungă/dinamică' : 'lungă'} ` +
+        `(mișcarea ${cruxMoveIdx}→${cruxMoveIdx + 1}, ${(maxDist * 100).toFixed(1)}% din perete).`;
+    } else {
+      const cruxPos = cruxHoldIdx === 0 ? 'la start' : cruxHoldIdx === chain.length - 1 ? 'la finish' : 'la mijlocul traseului';
+      reasoning =
+        `🔥 Dificultatea este dată de o priză foarte mică (crimp/micro) ${cruxPos} ` +
+        `(arie: ${(minArea * 10000).toFixed(1)} u²).`;
+    }
+
+    if (traverseBonus > 0) {
+      reasoning += `\n↔️ Traseu cu mișcări laterale semnificative (+${traverseBonus}p).`;
+    }
+    if (enduranceBonus > 0) {
+      reasoning += `\n� Bonus anduranță: ${chain.length} prize (+${enduranceBonus.toFixed(1)}p).`;
+    }
+
+    reasoning +=
+      `\n\n📏 Crux reach: ${(maxDist * 100).toFixed(1)}%` +
+      `\n📐 Crux hold: ${(minArea * 10000).toFixed(1)} u²` +
+      `\n🧗 Prize în traseu: ${chain.length}` +
+      `\n🎯 Scor: ${score}/100`;
+
+    setEvaluationResult({ grade: vGrade, reasoning, difficultyScore: score });
+  };
 
   /* ── Render helpers ──────────────────────────────────────── */
   const imageMaxW = SCREEN_W - 32;
   const imageH = imageMaxW / imgAspect;
+  const selectedCount = Object.keys(selectedHolds).length;
+  const isRouteValid = selectedCount >= MIN_HOLDS && selectedCount <= MAX_HOLDS;
 
   const renderHoldOverlay = () => {
     if (imgLayout.width === 0 || holds.length === 0) return null;
@@ -158,9 +417,11 @@ export default function SpraywallScreen() {
           const rectX = cx - boxW / 2;
           const rectY = cy - boxH / 2;
 
-          const isSelected = selectedHolds.includes(idx);
-          const strokeColor = isSelected ? C.neon : 'rgba(255,255,255,0.3)';
-          const fillColor = isSelected ? C.neon + '22' : 'transparent';
+          const role = selectedHolds[idx] as HoldRole | undefined;
+          const isSelected = !!role;
+          const roleColor = role ? ROLE_COLORS[role] : '';
+          const strokeColor = isSelected ? roleColor : 'rgba(255,255,255,0.3)';
+          const fillColor = isSelected ? roleColor + '22' : 'transparent';
           const sw = isSelected ? 3.5 : 1.5;
 
           return (
@@ -181,11 +442,11 @@ export default function SpraywallScreen() {
                   x={cx}
                   y={rectY - 5}
                   fontSize={9}
-                  fill={C.neon}
+                  fill={roleColor}
                   textAnchor="middle"
                   fontWeight="bold"
                 >
-                  {hold.hold_type}
+                  {role ? ROLE_LABELS[role] : hold.hold_type}
                 </SvgText>
               )}
             </React.Fragment>
@@ -238,7 +499,7 @@ export default function SpraywallScreen() {
           <View style={styles.statChip}>
             <Ionicons name="ellipse" size={8} color={C.neon} />
             <Text style={styles.statText}>
-              {selectedHolds.length} selected
+              {selectedCount} selected
             </Text>
           </View>
           <View style={styles.statChip}>
@@ -276,9 +537,15 @@ export default function SpraywallScreen() {
           </View>
         )}
 
-        {/* Hint */}
+        {/* Validation hint */}
         {!loading && holds.length > 0 && (
-          <Text style={styles.hint}>Tap holds to add them to your route</Text>
+          <Text style={[styles.hint, isRouteValid && styles.hintValid]}>
+            {selectedCount === 0
+              ? 'Apasă pe prize pentru a construi un traseu'
+              : selectedCount < MIN_HOLDS
+                ? `Ai selectat ${selectedCount} prize. Minim ${MIN_HOLDS} pentru un traseu valid.`
+                : `✓ Traseu valid — ${selectedCount} prize selectate`}
+          </Text>
         )}
 
         {/* Action buttons */}
@@ -300,7 +567,21 @@ export default function SpraywallScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
-            {selectedHolds.length > 0 && (
+            <TouchableOpacity
+              style={[styles.gradeBtn, !isRouteValid && styles.gradeBtnDisabled]}
+              onPress={() => {
+                if (!isRouteValid) return;
+                estimateRouteGrade();
+              }}
+              activeOpacity={isRouteValid ? 0.8 : 1}
+            >
+              <Text style={styles.gradeIcon}>🌟</Text>
+              <Text style={[styles.gradeText, !isRouteValid && styles.gradeTextDisabled]}>
+                Evaluează Gradul
+              </Text>
+            </TouchableOpacity>
+
+            {selectedCount > 0 && (
               <TouchableOpacity
                 style={styles.clearBtn}
                 onPress={clearRoute}
@@ -309,6 +590,62 @@ export default function SpraywallScreen() {
                 <Text style={styles.clearIcon}>🗑️</Text>
                 <Text style={styles.clearText}>Clear Route</Text>
               </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* Route Insights */}
+        {!loading && holds.length > 0 && (
+          <View style={styles.insightsWrap}>
+            <Text style={styles.insightsTitle}>Route Insights</Text>
+            {evaluationResult ? (
+              <Animated.View
+                style={[
+                  styles.insightsCard,
+                  {
+                    opacity: insightAnim,
+                    transform: [
+                      {
+                        translateY: insightAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [20, 0],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <View style={styles.insightsHeader}>
+                  <Text style={styles.insightsGrade}>
+                    {evaluationResult.grade}
+                  </Text>
+                  <View style={styles.insightsMeta}>
+                    <Text style={styles.insightsDiffLabel}>Dificultate</Text>
+                    <View style={styles.progressTrack}>
+                      <LinearGradient
+                        colors={[C.neon, C.accent]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={[
+                          styles.progressFill,
+                          { width: `${evaluationResult.difficultyScore}%` },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.insightsDiffValue}>
+                      {evaluationResult.difficultyScore}%
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.insightsReasoning}>
+                  {evaluationResult.reasoning}
+                </Text>
+              </Animated.View>
+            ) : (
+              <Text style={styles.insightsPlaceholder}>
+                Selectează prizele și apasă pe evaluare pentru a vedea
+                dificultatea.
+              </Text>
             )}
           </View>
         )}
@@ -464,5 +801,101 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: C.danger,
+  },
+  hintValid: {
+    color: C.neon,
+    fontStyle: 'normal',
+    fontWeight: '600',
+  },
+  gradeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: C.accent + '80',
+    backgroundColor: C.accent + '18',
+  },
+  gradeBtnDisabled: {
+    opacity: 0.4,
+  },
+  gradeIcon: { fontSize: 18 },
+  gradeText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  gradeTextDisabled: {
+    color: C.muted,
+  },
+
+  /* Route Insights */
+  insightsWrap: {
+    marginTop: 24,
+  },
+  insightsTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: C.primary,
+    marginBottom: 12,
+  },
+  insightsCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: C.accent + '50',
+    padding: 20,
+    gap: 16,
+  },
+  insightsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  insightsGrade: {
+    fontSize: 44,
+    fontWeight: '900',
+    color: C.neon,
+    letterSpacing: -1,
+  },
+  insightsMeta: {
+    flex: 1,
+    gap: 6,
+  },
+  insightsDiffLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: C.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: C.border,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%' as any,
+    borderRadius: 4,
+  },
+  insightsDiffValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.accent,
+  },
+  insightsReasoning: {
+    fontSize: 13,
+    color: C.secondary,
+    lineHeight: 20,
+  },
+  insightsPlaceholder: {
+    fontSize: 13,
+    color: C.muted,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    paddingVertical: 16,
   },
 });
