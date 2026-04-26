@@ -4,10 +4,15 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 from models.schemas import (
+<<<<<<< HEAD
+    AnalysisRequest, AnalysisResponse, RouteRecord,
+    DetectRequest, DetectResponse,
+=======
     AnalysisRequest, AnalysisResponse, RouteRecord, RouteStatus,
     DetectRequest, DetectResponse,
     GradeSelectionRequest, GradeSelectionResponse,
     ChatRequest, ChatResponse
+>>>>>>> main
 )
 from services.vision_service import VisionService
 from services.grading_service import GradingService
@@ -102,12 +107,24 @@ async def get_analysis(analysis_id: str):
         notes=doc.get("notes", ""),
         gym_name=doc.get("gym_name", "Unknown Gym"),
         processed_at=doc.get("analyzed_at", ""),
+<<<<<<< HEAD
+        detected_routes=doc.get("detected_routes", []) # Încărcăm traseele și din istoric
+=======
         detected_routes=doc.get("detected_routes", []),
         image_base64=doc.get("image_base64", None)
+>>>>>>> main
     )
 
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
+# Spray Wall — detect-only endpoint (Roboflow, no Gemini)
+# ---------------------------------------------------------------------------
+@router.post("/detect", response_model=DetectResponse)
+async def detect_holds(request: DetectRequest):
+    """Detect holds using Roboflow only. No Gemini grading involved."""
+    logger.info("🔍 /api/detect — Running Roboflow hold detection only")
+=======
 # Spray Wall Endpoints
 # ---------------------------------------------------------------------------
 
@@ -115,10 +132,22 @@ async def get_analysis(analysis_id: str):
 async def detect_holds(request: DetectRequest):
     """Step 1: Detect all holds on wall using Roboflow only (no grading)."""
     logger.info("🔍 Spray Wall: Starting hold detection (Roboflow only)")
+>>>>>>> main
 
     try:
         holds = await _vision.analyze_image(request.image_base64)
     except Exception as exc:
+<<<<<<< HEAD
+        logger.error(f"VisionService error in /detect: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Hold detection failed: {str(exc)}",
+        )
+
+    return DetectResponse(
+        holds=holds,
+        holds_count=len(holds),
+=======
         logger.error(f"VisionService error: {exc}")
         raise HTTPException(status_code=500, detail=f"Hold detection failed: {str(exc)}")
 
@@ -219,4 +248,5 @@ async def ask_coach(request: ChatRequest):
     return ChatResponse(
         reply=reply_text,
         processed_at=datetime.now(timezone.utc).isoformat()
+>>>>>>> main
     )

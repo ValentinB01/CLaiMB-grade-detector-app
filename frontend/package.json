@@ -4,6 +4,10 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
+    "start:coach": "cross-env EXPO_PUBLIC_VARIANT=coach expo start -c",
+    "start:community": "cross-env EXPO_PUBLIC_VARIANT=community expo start -c",
+    "build:coach:android": "eas build --profile coach-prod --platform android",
+    "build:community:android": "eas build --profile community-prod --platform android",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -59,6 +63,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~19.1.0",
+    "cross-env": "^7.0.3",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.3"

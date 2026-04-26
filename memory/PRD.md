@@ -55,16 +55,15 @@ Stack: React Native (Expo SDK 54) + FastAPI + MongoDB (env default, not PostgreS
 
 | # | Requirement | Status |
 |---|-------------|--------|
-| 1 | Camera captures photo → sends to backend | ✅ Done |
-| 2 | VisionService detects holds (x, y, radius) | ✅ Done |
-| 3 | SVG circles overlay on image | ✅ Done |
-| 4 | GradingService assigns V-scale grade | ✅ Done |
-| 5 | Pydantic models define mobile↔backend contract | ✅ Done |
-| 6 | Celery worker for async processing | ✅ Done (worker.py + tasks.py) |
-| 7 | Route history stored + displayed | ✅ Done |
-| 8 | Dark theme (Digital Crag) | ✅ Done |
-| 9 | Guest mode, no auth | ✅ Done |
-| 10 | Claude Sonnet 4-6 via Emergent Universal Key | ✅ Done |
+| 1 | Camera captures photo → sends to backend 
+| 2 | VisionService detects holds (x, y, radius) 
+| 3 | SVG circles overlay on image 
+| 4 | GradingService assigns V-scale grade 
+| 5 | Pydantic models define mobile↔backend contract 
+| 6 | Celery worker for async processing 
+| 7 | Route history stored + displayed 
+| 8 | Dark theme (Digital Crag) 
+| 9 | Guest mode, no auth 
 
 ---
 
@@ -90,7 +89,6 @@ Stack: React Native (Expo SDK 54) + FastAPI + MongoDB (env default, not PostgreS
 ---
 
 ## Environment / Keys
-- `EMERGENT_LLM_KEY` — Set in `/app/backend/.env`
 - `ROBOFLOW_API_KEY` — Optional; enables Roboflow hybrid detection
 - `REDIS_URL` — Optional; enables Celery async processing (currently in-process)
 

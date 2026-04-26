@@ -1,49 +1,71 @@
 import os
-import shutil
+import uuid
 import logging
-from typing import Optional
-from fastapi import APIRouter, UploadFile, File
+from datetime import datetime
+
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+
 from services.pose_service import PoseService, processing_status
+from database import db
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 pose_service = PoseService()
+logger = logging.getLogger(__name__)
 
-# Temporarily store incoming videos for processing
-UPLOAD_DIR = "temp_videos"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+@router.post("/pose/analyze")
+async def analyze_pose(
+    video: UploadFile = File(...),
+    user_id: str = Form("guest"),
+):
+    """
+    Primește un videoclip și rulează YOLO11 Pose pentru a extrage keypointurile.
+    Salvează rezultatul în colecția pose_history pentru The Vault.
+    """
+    progress_id = str(uuid.uuid4())
+    temp_path = f"static/temp_{progress_id}_{video.filename}"
 
-@router.post("/analyze-video")
-def analyze_video(video: UploadFile = File(...), progress_id: Optional[str] = None):
-    """
-    Endpoint to receive a climbing video, run YOLO11 pose estimation, 
-    and return the keypoint coordinates and metrics.
-    """
-    logger.info(f"🎥 Received video upload for pose analysis: {video.filename}")
-    
-    # Save the uploaded video to a temporary file
-    temp_video_path = os.path.join(UPLOAD_DIR, video.filename)
-    
-    with open(temp_video_path, "wb") as buffer:
-        shutil.copyfileobj(video.file, buffer)
-        
     try:
-        # Process the video
-        # Note: Depending on video length, this could be slow and might be better
-        # offloaded to a background task (e.g. Celery) for production
-        logger.info(f"🚀 Starting YOLO11 inference on {video.filename}...")
-        results = pose_service.process_video(temp_video_path, progress_id=progress_id)
-        logger.info(f"✅ Successfully analyzed {video.filename}!")
-    finally:
-        # Clean up the temp file
-        if os.path.exists(temp_video_path):
-            os.remove(temp_video_path)
-            
-    return {"status": "success", "data": results}
+        os.makedirs("static", exist_ok=True)
+        with open(temp_path, "wb") as f:
+            content = await video.read()
+            f.write(content)
 
-@router.get("/progress/{progress_id}")
+        result = pose_service.process_video(temp_path, progress_id=progress_id)
+
+        if "error" in result:
+            raise HTTPException(status_code=500, detail=result["error"])
+
+        # Salvăm analiza în MongoDB pentru The Vault
+        analysis = result.get("analysis", {})
+        pose_doc = {
+            "user_id": user_id,
+            "final_overall_score": analysis.get("final_overall_score", 0),
+            "consolidated_feedback": analysis.get("consolidated_feedback", ""),
+            "efficiency_score": analysis.get("efficiency_score", 0),
+            "feedback": analysis.get("feedback", ""),
+            "balance_score": analysis.get("balance_score", 0),
+            "balance_feedback": analysis.get("balance_feedback", ""),
+            "fluidity_score": analysis.get("fluidity_score", 0),
+            "fluidity_feedback": analysis.get("fluidity_feedback", ""),
+            "total_active_frames": analysis.get("total_active_frames", 0),
+            "frames_with_straight_arms": analysis.get("frames_with_straight_arms", 0),
+            "video_url": result.get("video_url", ""),
+            "analyzed_at": datetime.utcnow().isoformat(),
+        }
+        await db.db.pose_history.insert_one(pose_doc)
+        logger.info(f"✅ Pose analysis saved for user {user_id}")
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Eroare la analiza pose: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+@router.get("/pose/progress/{progress_id}")
 async def get_progress(progress_id: str):
-    """
-    Returns the current processing percentage for a given progress_id.
-    """
-    return {"progress": processing_status.get(progress_id, 0)}
+    """Returnează progresul procesării video."""
+    return {"progress": processing_status.get(progress_id, -1)}

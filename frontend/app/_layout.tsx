@@ -11,8 +11,33 @@ export default function RootLayout() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      
+      if (currentUser) {
+        try {
+          // IMPORTANT: Aici pui IP-ul/URL-ul real al backend-ului tău (ex: http://192.168.1.100:8000)
+          const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.129:8000'; 
+          
+          const response = await fetch(`${API_URL}/users/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              uid: currentUser.uid,
+              email: currentUser.email || 'no-email@claimb.com',
+              display_name: currentUser.displayName || 'Cățărător Anonim',
+            }),
+          });
+          
+          if (response.ok) {
+            const dbUser = await response.json();
+            console.log("Sincronizare MongoDB reușită! Status cont PRO:", dbUser.is_pro);
+          }
+        } catch (error) {
+          console.error("Eroare la sincronizarea cu backend-ul:", error);
+        }
+      }
+
       setLoading(false);
     });
     return unsubscribe;
@@ -20,7 +45,7 @@ export default function RootLayout() {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, backgroundColor: '#09090b', justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#ffffff" />
       </View>
     );
@@ -30,15 +55,14 @@ export default function RootLayout() {
     <>
       <StatusBar style="light" />
       {user ? (
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#0f172a' } }}>
+        // Dacă AVEM user, arătăm aplicația (camerele, tab-urile)
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: '#09090b' } }}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="result" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-          <Stack.Screen name="profile" options={{ headerShown: false, presentation: 'modal' }} />
-          <Stack.Screen name="about" options={{ headerShown: false, presentation: 'modal' }} />
-          <Stack.Screen name="contact" options={{ headerShown: false, presentation: 'modal' }} />
-          <Stack.Screen name="help" options={{ headerShown: false, presentation: 'modal' }} />
+          <Stack.Screen name="gym/[id]" options={{ headerShown: false, presentation: 'card' }} />
         </Stack>
       ) : (
+        // Dacă NU avem user, arătăm direct ecranul de Login pe tot ecranul
         <LoginScreen />
       )}
     </>

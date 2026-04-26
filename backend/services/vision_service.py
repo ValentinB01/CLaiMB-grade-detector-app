@@ -3,9 +3,11 @@ import json
 import base64
 import logging
 import io
+import binascii
 import httpx # Asigură-te că ai rulat: pip install httpx
 from typing import List, Optional
-from PIL import Image as PILImage, ImageOps
+from PIL import Image as PILImage, ImageOps, UnidentifiedImageError
+
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
@@ -13,6 +15,7 @@ try:
 except ImportError:
     print("⚠️ pillow-heif NOT found. iPhone (HEIC) images will fail.")
     pass
+
 from models.schemas import HoldLocation
 
 logger = logging.getLogger(__name__)
@@ -20,14 +23,11 @@ logger = logging.getLogger(__name__)
 class VisionService:
     """Detectează prizele de cățărat folosind exclusiv Roboflow (Gratuit)."""
 
-    MAX_DIM = 1024  # Max width/height before sending to Roboflow
-
     def __init__(self):
         # Citim cheia direct din mediu
         self.roboflow_key: Optional[str] = os.environ.get("ROBOFLOW_API_KEY")
         
         # ⚠️ AICI MODIFICI CU DATELE NOULUI TĂU MODEL DE PE ROBOFLOW UNIVERSE
-        # Dacă modelul se numește "bouldering-holds-xyz" și are versiunea "3", scrii așa:
         self.project = os.environ.get("ROBOFLOW_PROJECT", "holds-tptrk-u6v1c") 
         self.version = os.environ.get("ROBOFLOW_VERSION", "2")
         
@@ -59,14 +59,25 @@ class VisionService:
             resized_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
             logger.info(f"📐 Resized/Oriented image to {w}x{h} (b64 len: {len(image_base64)} → {len(resized_b64)})")
             return resized_b64
+        except (binascii.Error, ValueError):
+            logger.error("❌ Eroare: String-ul Base64 furnizat este invalid sau corupt.")
+            raise ValueError("Imaginea transmisă este invalidă.")
+        except UnidentifiedImageError:
+            logger.error("❌ Eroare: Fișierul nu este o imagine recunoscută (posibil format nesuportat).")
+            raise ValueError("Formatul imaginii nu este suportat.")
         except Exception as e:
             logger.warning(f"⚠️ Resize failed, using original: {e}")
             return image_base64
 
     async def analyze_image(self, image_base64: str) -> List[HoldLocation]:
         """Punctul de intrare principal pentru analiza imaginii."""
+        # Plasa de siguranță pentru input gol sau prea mic
+        if not image_base64 or len(image_base64) < 100:
+            logger.error("❌ Imaginea trimisă este goală sau prea mică.")
+            return self._fallback_holds()
+
         if not self.roboflow_key:
-            logger.error("❌ ROBOFLOW_API_KEY lipsește din .env! Folosesc date simulate.")
+            logger.error("❌ ROBOFLOW_API_KEY lipsește din .env! Folosesc fallback-ul curent.")
             return self._fallback_holds()
 
         return await self._detect_roboflow(image_base64)
@@ -81,7 +92,6 @@ class VisionService:
             clean_base64 = self._resize_base64(clean_base64)
 
             logger.info(f"📤 Sending to Roboflow (b64 len: {len(clean_base64)})")
-            print(f"📦 B64 Preview: {clean_base64[:50]}...")
             
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(
@@ -94,7 +104,6 @@ class VisionService:
             if resp.status_code != 200:
                 error_txt = resp.text
                 logger.error(f"⚠️ Roboflow Error {resp.status_code}: {error_txt}")
-                # Log critical info for the user to see in terminal
                 print(f"❌ ROBOFLOW ERROR: {resp.status_code} - {error_txt}")
                 return self._fallback_holds()
 
@@ -106,23 +115,17 @@ class VisionService:
             
             holds = []
             for pred in data.get("predictions", []):
-                # Spray walls are dense, lower threshold to capture more holds
-                if pred.get("confidence", 0) < 0.05:
+                # Filtrăm predicțiile slabe (păstrăm doar ce e >= 60% sigur)
+                if pred.get("confidence", 0) < 0.45:
                     continue
 
                 clasa_detectata = pred.get("class", "unknown").lower()
                 
-                clase_detaliate = ["crimp", "jug", "sloper", "pinch", "pocket", "volume", "holds"] # Am pus și "holds" (plural) just in case
+                clase_detaliate = ["crimp", "jug", "sloper", "pinch", "pocket", "volume", "holds"]
                 if clasa_detectata in clase_detaliate:
                     clasa_detectata = "hold"
 
                 h_type = self._map_label_to_type(clasa_detectata)
-                
-                # Extragem poligonul (dacă modelul este de tip Instance Segmentation)
-                points = pred.get("points", [])
-                polygon_data = None
-                if points:
-                    polygon_data = [{"x": p["x"] / img_w, "y": p["y"] / img_h} for p in points]
                 
                 holds.append(
                     HoldLocation(
@@ -133,23 +136,24 @@ class VisionService:
                         radius=max(pred["width"], pred["height"]) / (2 * max(img_w, img_h)), 
                         confidence=round(pred["confidence"], 3),
                         hold_type=h_type,          
-                        color=clasa_detectata,
-                        polygon=polygon_data
+                        color=clasa_detectata      
                     )
                 )
             
             logger.info(f"✅ Roboflow a detectat {len(holds)} prize.")
             return holds
+            
+        except ValueError as ve:
+            logger.error(f"❌ Eroare de validare a imaginii: {ve}")
+            return self._fallback_holds()
         except Exception as e:
             logger.error(f"❌ Eroare la apelul Roboflow: {e}")
             return self._fallback_holds()
 
     def _map_label_to_type(self, label: str) -> str:
         """Convertește etichetele modelului AI în tipurile sigure pt Frontend."""
-        # 1. Corectat bug-ul cu label.lower
         lbl = label.lower()
         
-        # 2. Mapare inteligentă:
         if "start" in lbl:
             return "start"
         if "finish" in lbl or "top" in lbl:
@@ -157,11 +161,9 @@ class VisionService:
         if "foot" in lbl:
             return "foot"
             
-        # Orice altceva (jug, crimp, sloper, pinch, volume, etc.) devine "hand"
-        # pentru a nu da crash schemei Pydantic, dar denumirea reală rămâne salvată în `color`
         return "hand"
     
     def _fallback_holds(self):
         """Funcție de siguranță: returnează o listă goală dacă Roboflow pică."""
-        logger.warning("⚠️ Se folosește fallback_holds deoarece Roboflow a eșuat.")
+        logger.warning("⚠️ Se folosește fallback_holds deoarece procesarea a eșuat.")
         return []

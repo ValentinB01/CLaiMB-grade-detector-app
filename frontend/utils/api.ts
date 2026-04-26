@@ -1,27 +1,22 @@
-import { auth } from '../firebaseConfig'; // <-- IMPORT FOARTE IMPORTANT
+import { auth } from '../firebaseConfig';
 import Constants from 'expo-constants';
 
-// Get the actual local IP of the dev machine dynamically from Expo
 const getLocalServerUrl = () => {
   if (__DEV__) {
     const hostUri = Constants.expoConfig?.hostUri || Constants.manifest2?.extra?.expoGo?.debuggerHost;
     if (hostUri) {
-      // Remove port and add our backend port :8000
       const ip = hostUri.split(':')[0];
       return `http://${ip}:8000`;
     }
   }
-  // Fallbacks if not running via Expo Go
   return 'http://[IP_ADDRESS]';
 };
 
 // const BASE_URL = getLocalServerUrl();
 // const BASE_URL = 'http://10.40.141.116:8000'; //ASTA MERGE LA FACULTATE!!!!!!!!!!!!!!!!! NU STERGE!!!!!!!!!!!
-const BASE_URL = 'http://192.168.1.134:8000'; // IP-ul tău local (MAXIM STABIL)
+const BASE_URL = 'http://192.168.1.129:8000'; // IP-ul tău local (MAXIM STABIL)
 // const BASE_URL = 'https://climb-valy-v3-888.loca.lt'; // Tunel V3 (Ignoră-l dacă face figuri)
 
-// Fetch with timeout (AbortController) — 180s for slow AI inference endpoints (queued requests)
-// ---------------------------------------------------------------------------
 const fetchWithTimeout = (
   url: string,
   options: RequestInit = {},
@@ -31,7 +26,7 @@ const fetchWithTimeout = (
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   const mergedHeaders: Record<string, string> = {
-    'Bypass-Tunnel-Reminder': 'true' // Mandatory for localtunnel APIs
+    'Bypass-Tunnel-Reminder': 'true'
   };
   if (options.headers) {
     if (options.headers instanceof Headers) {
@@ -55,71 +50,65 @@ export interface AnalyzePayload {
   user_id?: string;
 }
 
-// Returns the current user's UID, or 'guest' if not logged in
 const getCurrentUserId = () => {
   return auth.currentUser?.uid || 'guest';
 };
 
 export const analyzeRoute = async (payload: AnalyzePayload) => {
   try {
-    const userId = getCurrentUserId();
-
-    console.log('📡 Fetching:', `${BASE_URL}/api/analyze`, 'for user:', userId);
-
-    const res = await fetchWithTimeout(`${BASE_URL}/api/analyze`, {
+    const userId = getCurrentUserId(); // Luăm ID-ul real!
+    
+    console.log("📡 Încerc fetch la:", `${BASE_URL}/api/analyze`, "pentru user:", userId);
+    
+    const res = await fetch(`${BASE_URL}/api/analyze`, {
       method: 'POST',
-      headers: {
+      headers: { 
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        ...payload,
-        wall_angle: payload.wall_angle || 'Vertical (0 degrees)',
-        user_id: userId,
+      body: JSON.stringify({ 
+        ...payload, 
+        wall_angle: payload.wall_angle || "Vertical (0 degrees)",
+        user_id: userId // <-- Trimitem UID-ul real către Backend
       }),
     });
-
+    
     if (!res.ok) {
-      const errorData = await res.text();
-      console.error('❌ Server error:', res.status, errorData);
-      throw new Error(`Server error: ${res.status}`);
+        const errorData = await res.text();
+        console.error("❌ Serverul a răspuns cu eroare:", res.status, errorData);
+        throw new Error(`Server error: ${res.status}`);
     }
 
     return await res.json();
   } catch (error) {
-    console.error('❌ Fetch error:', error);
+    console.error("❌ EROARE FETCH DETALIATĂ:", error);
     throw error;
   }
 };
 
 export const fetchHistory = async () => {
   const userId = getCurrentUserId();
-  const res = await fetchWithTimeout(`${BASE_URL}/api/history?user_id=${userId}`);
-
+  const res = await fetch(`${BASE_URL}/api/history?user_id=${userId}`); // <-- Filtrăm după user
+  
   if (!res.ok) throw new Error(`History fetch failed: ${res.status}`);
-  return res.json();
-};
-
-export const fetchAnalysisById = async (analysisId: string) => {
-  const res = await fetchWithTimeout(`${BASE_URL}/api/analyze/${analysisId}`);
-  if (!res.ok) throw new Error(`Fetch analysis failed: ${res.status}`);
   return res.json();
 };
 
 export const fetchStats = async () => {
   const userId = getCurrentUserId();
-  const res = await fetchWithTimeout(`${BASE_URL}/api/history/stats?user_id=${userId}`);
-
+  const res = await fetch(`${BASE_URL}/api/history/stats?user_id=${userId}`); // <-- Filtrăm după user
+  
   if (!res.ok) throw new Error(`Stats fetch failed: ${res.status}`);
   return res.json();
 };
 
 export const deleteHistory = async (recordId: string) => {
   const userId = getCurrentUserId();
-  const res = await fetchWithTimeout(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, {
-    method: 'DELETE'
+  // Am adăugat ?user_id=${userId} aici, ca Backend-ul să știe că TU ai voie să ștergi traseul
+  const res = await fetch(`${BASE_URL}/api/history/${recordId}?user_id=${userId}`, { 
+    method: 'DELETE' 
   });
-
+  
   if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
   return res.json();
 };
@@ -153,10 +142,6 @@ export const updateHistoryGym = async (recordId: string, gymName: string) => {
   return response.json();
 };
 
-
-// ---------------------------------------------------------------------------
-// Spray Wall API
-// ---------------------------------------------------------------------------
 
 export interface DetectPayload {
   image_base64: string;
@@ -232,27 +217,124 @@ export const gradeSelection = async (payload: GradeSelectionPayload) => {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Chat / Ask the Coach API
-// ---------------------------------------------------------------------------
 
 export interface ChatMessagePayload {
-  role: 'user' | 'coach';
+  role: 'user' | 'model';
   text: string;
 }
 
 export interface AskCoachPayload {
-  image_base64: string;
-  holds: any[];
-  prompt: string;
-  history?: ChatMessagePayload[];
-  wall_angle?: string;
-  gym_name?: string;
+  messages: ChatMessagePayload[];
 }
 
-export const askCoach = async (payload: AskCoachPayload) => {
+// ── Pose History (The Vault) ─────────────────────────────────
+export interface PoseRecord {
+  id: string;
+  user_id: string;
+  final_overall_score: number;
+  consolidated_feedback: string;
+  efficiency_score: number;
+  feedback: string;
+  balance_score: number;
+  balance_feedback: string;
+  fluidity_score: number;
+  fluidity_feedback: string;
+  total_active_frames: number;
+  frames_with_straight_arms: number;
+  video_url?: string;
+  analyzed_at: string;
+}
+
+export const fetchPoseHistory = async (): Promise<{ records: PoseRecord[]; total: number }> => {
+  const userId = getCurrentUserId();
+  const res = await fetch(`${BASE_URL}/api/pose-history?user_id=${userId}`);
+  if (!res.ok) throw new Error(`Pose history fetch failed: ${res.status}`);
+  return res.json();
+};
+
+export const deletePoseHistory = async (analysisId: string): Promise<{ message: string }> => {
+  const userId = getCurrentUserId();
+  const res = await fetch(`${BASE_URL}/api/pose-history/${analysisId}?user_id=${userId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(`Delete pose history failed: ${res.status}`);
+  return res.json();
+};
+
+// ── Pose / Video Analysis ────────────────────────────────────
+export interface PoseAnalysisResult {
+  metadata: {
+    fps: number;
+    width: number;
+    height: number;
+    total_frames: number;
+  };
+  frames: Record<string, number[][]>;
+  analysis: {
+    final_overall_score: number;
+    consolidated_feedback: string;
+    efficiency_score: number;
+    feedback: string;
+    total_active_frames: number;
+    frames_with_straight_arms: number;
+    per_frame_angles: Record<string, Record<string, number>>;
+    balance_score?: number;
+    balance_feedback?: string;
+    balance_active_frames?: number;
+    frames_in_balance?: number;
+    fluidity_score?: number;
+    fluidity_feedback?: string;
+    static_frames?: number;
+    moving_frames?: number;
+    total_active_fluidity_frames?: number;
+  };
+  video_url: string;
+}
+
+export const analyzePose = async (
+  videoUri: string,
+  fileName: string,
+  onProgress?: (pct: number) => void
+): Promise<PoseAnalysisResult> => {
+  const userId = getCurrentUserId();
+  const formData = new FormData();
+  formData.append('video', {
+    uri: videoUri,
+    name: fileName || 'climbing_video.mp4',
+    type: 'video/mp4',
+  } as any);
+  formData.append('user_id', userId);
+
+  console.log('🎬 Pose: uploading video to', `${BASE_URL}/api/pose/analyze`, 'for user:', userId);
+
+  const res = await fetchWithTimeout(
+    `${BASE_URL}/api/pose/analyze`,
+    {
+      method: 'POST',
+      body: formData,
+      // Do NOT set Content-Type — fetch will auto-set multipart boundary
+    },
+    300_000 // 5 min timeout for video processing
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error('❌ Pose analysis error:', res.status, errText);
+    throw new Error(`Pose analysis error: ${res.status}`);
+  }
+
+  return await res.json();
+};
+
+export const fetchPoseProgress = async (progressId: string): Promise<number> => {
+  const res = await fetch(`${BASE_URL}/api/pose/progress/${progressId}`);
+  if (!res.ok) return -1;
+  const data = await res.json();
+  return data.progress ?? -1;
+};
+
+export const askCoach = async (payload: AskCoachPayload): Promise<{ reply: string }> => {
   try {
-    const userId = getCurrentUserId();
     console.log("💬 Coaching Chat:", `${BASE_URL}/api/chat`);
 
     const res = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
@@ -261,10 +343,7 @@ export const askCoach = async (payload: AskCoachPayload) => {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify({
-        ...payload,
-        user_id: userId,
-      }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {

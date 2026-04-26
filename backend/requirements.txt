@@ -10,3 +10,7 @@ scikit-learn
 ultralytics
 opencv-python-headless
 python-multipart
+celery
+redis
+pillow-heif
+pydantic
