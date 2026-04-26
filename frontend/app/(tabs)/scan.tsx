@@ -35,25 +35,45 @@ export default function ScanScreen() {
       if (scanned) return;
       setScanned(true);
 
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed.type !== 'gym_join' || !parsed.gym_id) {
-          Alert.alert('Cod invalid', 'Acesta nu este un cod QR valid pentru CLaiMB.', [
-            { text: 'Scanează din nou', onPress: () => setScanned(false) },
-          ]);
-          return;
-        }
+      let extractedGymId = null;
 
-        await AsyncStorage.setItem('@current_gym_id', parsed.gym_id);
+      try {
+        // 1. Încercăm să vedem dacă ai generat QR-ul sub formă de JSON
+        // (așa cum aștepta codul tău original)
+        const parsed = JSON.parse(data);
+        if (parsed.type === 'gym_join' && parsed.gym_id) {
+          extractedGymId = parsed.gym_id;
+        }
+      } catch {
+        // 2. Dacă dă eroare (nu e JSON), verificăm dacă este un Link (claimb://...)
+        if (data.includes('gym_id=')) {
+          extractedGymId = data.split('gym_id=')[1].split('&')[0];
+        } 
+        // 3. Dacă nu e nici link, presupunem că ai pus DOAR ID-ul în generatorul QR
+        else if (data.length > 20) { // UUID-urile au 36 de caractere
+          extractedGymId = data;
+        }
+      }
+
+      // Dacă nu am reușit să extragem niciun ID valid
+      if (!extractedGymId) {
+        Alert.alert('Cod invalid', 'Acesta nu este un cod QR valid pentru CLaiMB.', [
+          { text: 'Scanează din nou', onPress: () => setScanned(false) },
+        ]);
+        return;
+      }
+
+      // Dacă am găsit ID-ul, îl salvăm și arătăm succesul
+      try {
+        await AsyncStorage.setItem('@current_gym_id', extractedGymId);
         setSuccess(true);
 
         setTimeout(() => {
-          router.replace('/');
+          router.replace('/'); // Te duce înapoi pe Home
         }, 1500);
-      } catch {
-        Alert.alert('Cod invalid', 'QR-ul scanat nu este recunoscut de aplicație.', [
-          { text: 'Scanează din nou', onPress: () => setScanned(false) },
-        ]);
+      } catch (error) {
+        Alert.alert('Eroare', 'Nu am putut salva sala în telefon.');
+        setScanned(false);
       }
     },
     [scanned, router],

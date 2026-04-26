@@ -146,22 +146,27 @@ async def delete_gym_news(gym_id: str, news_id: str):
 # 4. Înregistrează o reușită (Bifează un traseu)
 @router.post("/ascents", response_model=Ascent)
 async def log_ascent(ascent: Ascent):
-    # Căutăm traseul ca să vedem câte puncte de bază oferă
-    route = await db.db["routes"].find_one({"route_id": ascent.route_id})
-    if not route:
-        raise HTTPException(status_code=404, detail="Traseul nu a fost găsit în baza de date.")
-    
-    base_points = route.get("points", 100)
-    
-    # Sistemul de Gamificare (Calcularea punctelor în funcție de stilul ales)
-    if ascent.style == "Flash":
-        ascent.points_awarded = base_points + 50  # Bonus pentru flash
-    elif ascent.style == "Zone":
-        ascent.points_awarded = base_points // 2  # Jumătate de puncte dacă a ajuns doar la zonă
-    elif ascent.style == "Attempt":
-        ascent.points_awarded = 0                 # Fără puncte dacă doar a încercat
+    # Urcări manuale (din Arena) — nu au traseu real în DB
+    if ascent.route_id.startswith("manual_"):
+        # Punctele sunt calculate pe client și trimise direct
+        pass
     else:
-        ascent.points_awarded = base_points       # Redpoint (Punctaj standard)
+        # Căutăm traseul ca să vedem câte puncte de bază oferă
+        route = await db.db["routes"].find_one({"route_id": ascent.route_id})
+        if not route:
+            raise HTTPException(status_code=404, detail="Traseul nu a fost găsit în baza de date.")
+        
+        base_points = route.get("points", 100)
+        
+        # Sistemul de Gamificare (Calcularea punctelor în funcție de stilul ales)
+        if ascent.style == "Flash":
+            ascent.points_awarded = base_points + 50  # Bonus pentru flash
+        elif ascent.style == "Zone":
+            ascent.points_awarded = base_points // 2  # Jumătate de puncte dacă a ajuns doar la zonă
+        elif ascent.style == "Attempt":
+            ascent.points_awarded = 0                 # Fără puncte dacă doar a încercat
+        else:
+            ascent.points_awarded = base_points       # Redpoint (Punctaj standard)
 
     # Salvăm reușita în MongoDB
     ascent_dict = ascent.dict()
