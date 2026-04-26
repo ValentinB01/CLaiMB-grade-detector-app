@@ -1,0 +1,104 @@
+# CLaiMB AI Coach - Complete Installation & Setup Guide
+
+This project has two components: a React Native (Expo) frontend and a Python (FastAPI) backend.
+Follow the steps below in order.
+
+================================================================================
+## GLOBAL REQUIREMENTS (install once)
+================================================================================
+
+1. Node.js v18+           → https://nodejs.org/
+2. Python 3.9+            → https://www.python.org/downloads/
+3. Git                    → https://git-scm.com/
+4. Expo Go (on phone)     → App Store / Google Play (for testing on a real device)
+   OR a configured Android/iOS emulator on your machine
+5. MongoDB Atlas (cloud)  → https://www.mongodb.com/atlas
+   - Create a free cluster and copy the connection string
+
+================================================================================
+## 1. BACKEND (Python / FastAPI)
+================================================================================
+
+### Install dependencies
+  cd backend
+  pip install -r requirements.txt
+
+  Packages installed:
+  - fastapi           → web framework
+  - uvicorn           → ASGI server
+  - motor             → async MongoDB driver
+  - python-dotenv     → reads variables from .env
+  - httpx             → async HTTP client
+  - pillow            → image processing
+  - google-genai      → Google Gemini AI integration
+  - numpy             → numerical operations
+  - scikit-learn      → ML algorithms
+
+### Configure .env
+  Create the file backend/.env with the following content (fill in your own values):
+
+  MONGODB_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/<dbname>?retryWrites=true&w=majority
+  GOOGLE_API_KEY=<your_google_gemini_api_key>
+
+  Where to get the values:
+  - MONGODB_URI     → MongoDB Atlas → Connect → Drivers
+  - GOOGLE_API_KEY  → https://aistudio.google.com/app/apikey
+
+### Start the server
+  cd backend
+  uvicorn server:app --reload --port 8000
+
+  Server will be available at: http://localhost:8000
+
+================================================================================
+## 2. FRONTEND (React Native / Expo)
+================================================================================
+
+### Install dependencies
+  cd frontend
+  npm install
+  (or: yarn install)
+
+### Configure .env
+  Create the file frontend/.env with the following content:
+
+  EXPO_PUBLIC_API_URL=http://<your_local_ip>:8000
+  EXPO_PUBLIC_FIREBASE_API_KEY=<firebase_key>
+  EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=<project>.firebaseapp.com
+  EXPO_PUBLIC_FIREBASE_PROJECT_ID=<project>
+  EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=<project>.appspot.com
+  EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=<id>
+  EXPO_PUBLIC_FIREBASE_APP_ID=<app_id>
+
+  Where to get the values:
+  - Firebase  → https://console.firebase.google.com/ → Project Settings → Your apps → SDK setup
+  - API_URL   → use your local IP address (e.g. 192.168.1.x), NOT "localhost"
+                Find your IP with: ipconfig (Windows) or ifconfig (Mac/Linux)
+
+### Start the app
+  cd frontend
+  npx expo start
+
+  Options:
+  - Press "a" for Android emulator
+  - Press "i" for iOS simulator
+  - Scan the QR code with Expo Go on your phone (recommended for real device)
+
+================================================================================
+## 3. STARTUP ORDER (every time you run the project)
+================================================================================
+
+  Terminal 1 (backend):   cd backend && uvicorn server:app --reload --port 8000
+  Terminal 2 (frontend):  cd frontend && npx expo start
+
+================================================================================
+## 4. COMMON ISSUES
+================================================================================
+
+  - "Network request failed"  → Make sure you use your local IP (not localhost) in EXPO_PUBLIC_API_URL
+  - "MongoServerError"        → Check MONGODB_URI in backend/.env and whitelist your IP on Atlas
+  - "expo: command not found" → Run: npm install -g expo-cli
+  - Missing module (frontend) → Run: cd frontend && npm install
+  - Missing module (backend)  → Run: cd backend && pip install -r requirements.txt
+
+================================================================================
